@@ -6,6 +6,8 @@
 
 In practical terms, Schizm is a prompt-driven knowledge operations workspace. It combines a Next.js frontend, a GraphQL API, Postgres-backed prompt state, and a Codex CLI runner to maintain `./obsidian-repository` as a living Obsidian-style mind map. The coding agent is allowed to modify only the document store; the surrounding application handles queueing, isolation, audit synchronization, and Git automation.
 
+For a concrete example of the document store after a run, see the [`example/1` demo branch](https://github.com/smysnk/schizsm/tree/example/1).
+
 ## Purpose
 
 The project is designed to turn a note repository into an actively maintained knowledge base instead of a graveyard of half-finished thoughts.
