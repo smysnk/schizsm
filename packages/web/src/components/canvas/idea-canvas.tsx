@@ -1,58 +1,51 @@
 "use client";
 
-import { useMutation, useQuery } from "@apollo/client";
+import { useMutation, useQuery, useSubscription } from "@apollo/client";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type FormEvent,
-  type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent
+  type KeyboardEvent as ReactKeyboardEvent
 } from "react";
 import {
-  CANVAS_BOOTSTRAP_QUERY,
   CANCEL_PROMPT_MUTATION,
   CREATE_PROMPT_MUTATION,
-  MOVE_IDEA_MUTATION,
   PAUSE_PROMPT_RUNNER_MUTATION,
+  PROMPT_WORKSPACE_SUBSCRIPTION,
   PROMPTS_QUERY,
   RESUME_PROMPT_RUNNER_MUTATION,
   RETRY_PROMPT_MUTATION,
-  type GraphSnapshot,
-  type IdeaNode,
   type PromptRecord,
   type PromptRunnerStateRecord,
   type PromptStatus,
-  type RuntimeConfigShape
+  type PromptWorkspaceUpdateRecord
 } from "../../lib/graphql";
+import {
+  useRealtimeConnectionStatus,
+  type RealtimeConnectionStatus
+} from "../../lib/apollo";
 import { readRuntimeConfig } from "../../lib/runtime-config";
+import {
+  PROMPT_ZEN_PLACEHOLDER_QUESTIONS,
+  PROMPT_ZEN_TYPING_CORRECTION_PAUSE_MS,
+  PROMPT_ZEN_TYPING_DELETE_MS,
+  PROMPT_ZEN_TYPING_END_PAUSE_MS,
+  PROMPT_ZEN_TYPING_ERROR_RATE,
+  PROMPT_ZEN_TYPING_MAX_MS,
+  PROMPT_ZEN_TYPING_MIN_MS,
+  PROMPT_ZEN_TYPING_START_PAUSE_MS
+} from "./prompt-zen.constants";
 import { ThemeToggle } from "../ui/theme-toggle";
-
-type BootstrapResponse = {
-  runtimeConfig: RuntimeConfigShape;
-  graphSnapshot: GraphSnapshot;
-};
-
-type MoveIdeaResponse = {
-  moveIdea: {
-    id: string;
-    x: number;
-    y: number;
-    updatedAt: string;
-  };
-};
-
-type MoveIdeaVariables = {
-  input: {
-    id: string;
-    x: number;
-    y: number;
-  };
-};
 
 type PromptsResponse = {
   promptRunnerState: PromptRunnerStateRecord;
   prompts: PromptRecord[];
+};
+
+type PromptWorkspaceSubscriptionResponse = {
+  promptWorkspace: PromptWorkspaceUpdateRecord;
 };
 
 type CreatePromptResponse = {
@@ -82,7 +75,7 @@ type CreatePromptVariables = {
 };
 
 type PromptHistoryFilter = "all" | "active" | "completed" | "failed" | "cancelled";
-type WorkspaceSurface = "prompt" | "history" | "field";
+type WorkspaceSurface = "prompt" | "history";
 
 type PromptTransitionRecord = {
   status: string;
@@ -90,40 +83,7 @@ type PromptTransitionRecord = {
   at: string;
 };
 
-type Viewport = {
-  x: number;
-  y: number;
-  scale: number;
-};
-
-type SurfaceInsets = {
-  top: number;
-  bottom: number;
-  left: number;
-  right: number;
-};
-
-type Interaction =
-  | {
-      type: "pan";
-      pointerId: number;
-      start: { x: number; y: number };
-      origin: Viewport;
-    }
-  | {
-      type: "drag-node";
-      pointerId: number;
-      nodeId: string;
-      startWorld: { x: number; y: number };
-      nodeOrigin: { x: number; y: number };
-      moved: boolean;
-    };
-
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value));
-
-const PROMPTS_POLL_INTERVAL_MS = 5_000;
-const RECENT_PROMPTS_LIMIT = 14;
+const RECENT_PROMPTS_LIMIT = 24;
 const activePromptStatuses = new Set<PromptStatus>([
   "queued",
   "scanning",
@@ -135,6 +95,7 @@ const activePromptStatuses = new Set<PromptStatus>([
   "pushing",
   "syncing_audit"
 ]);
+
 const promptHistoryFilters: Array<{ id: PromptHistoryFilter; label: string }> = [
   { id: "all", label: "All" },
   { id: "active", label: "Active" },
@@ -142,43 +103,16 @@ const promptHistoryFilters: Array<{ id: PromptHistoryFilter; label: string }> = 
   { id: "failed", label: "Failed" },
   { id: "cancelled", label: "Cancelled" }
 ];
+
 const workspaceSurfaces: Array<{ id: WorkspaceSurface; label: string }> = [
   { id: "prompt", label: "Prompt" },
-  { id: "history", label: "Prompt history" },
-  { id: "field", label: "Constellation field" }
+  { id: "history", label: "Prompt history" }
 ];
 
-const getClusterColor = (cluster: string) => {
-  if (typeof window === "undefined") {
-    return "#ffffff";
-  }
+const repoLabel = "smysnk/schizsm";
+const repoUrl = "https://github.com/smysnk/schizsm";
 
-  const styles = getComputedStyle(document.documentElement);
-
-  switch (cluster) {
-    case "signal":
-      return styles.getPropertyValue("--signal").trim() || "#ff8c39";
-    case "analysis":
-      return styles.getPropertyValue("--analysis").trim() || "#61f4de";
-    case "narrative":
-      return styles.getPropertyValue("--narrative").trim() || "#9f8cff";
-    case "action":
-      return styles.getPropertyValue("--action").trim() || "#ffe27a";
-    default:
-      return styles.getPropertyValue("--accent").trim() || "#ff8c39";
-  }
-};
-
-const getCssVar = (name: string, fallback: string) => {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
-
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-};
-
-const formatPromptStatus = (status: PromptStatus) =>
-  status.replace(/_/g, " ");
+const formatPromptStatus = (status: PromptStatus) => status.replace(/_/g, " ");
 
 const formatPromptTime = (value: string) => {
   const timestamp = Date.parse(value);
@@ -319,71 +253,145 @@ const matchesPromptHistoryFilter = (prompt: PromptRecord, filter: PromptHistoryF
   }
 };
 
-const canCancelPrompt = (prompt: PromptRecord | null) => prompt?.status === "queued";
+const canCancelPrompt = (prompt: PromptRecord | null) =>
+  prompt?.status === "queued" || prompt?.status === "failed";
 
 const canRetryPrompt = (prompt: PromptRecord | null) =>
   prompt?.status === "failed" || prompt?.status === "cancelled";
 
-const wrapText = (
-  context: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number
-) => {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let current = "";
-
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word;
-    if (context.measureText(next).width > maxWidth && current) {
-      lines.push(current);
-      current = word;
-      continue;
-    }
-
-    current = next;
+const formatRealtimeConnectionStatus = (status: RealtimeConnectionStatus) => {
+  switch (status) {
+    case "connected":
+      return "WebSocket connected";
+    case "reconnecting":
+      return "WebSocket reconnecting";
+    case "error":
+      return "WebSocket error";
+    case "connecting":
+      return "WebSocket connecting";
+    default:
+      return "WebSocket idle";
   }
-
-  if (current) {
-    lines.push(current);
-  }
-
-  return lines.slice(0, 3);
 };
+
+const getRealtimeConnectionTone = (status: RealtimeConnectionStatus) => {
+  switch (status) {
+    case "connected":
+      return "workspace__footer-note--positive";
+    case "error":
+      return "workspace__footer-note--danger";
+    case "reconnecting":
+    case "connecting":
+      return "workspace__footer-note--warning";
+    default:
+      return "";
+  }
+};
+
+const getRandomTypingDelay = (character: string) => {
+  const base =
+    PROMPT_ZEN_TYPING_MIN_MS +
+    Math.round(Math.random() * (PROMPT_ZEN_TYPING_MAX_MS - PROMPT_ZEN_TYPING_MIN_MS));
+
+  if (/[.,!?]/.test(character)) {
+    return base + 140;
+  }
+
+  if (/\s/.test(character)) {
+    return base + 44;
+  }
+
+  return base;
+};
+
+const getMistypedCharacter = (character: string) => {
+  const lowerLetters = "abcdefghijklmnopqrstuvwxyz";
+  const upperLetters = lowerLetters.toUpperCase();
+  const digits = "0123456789";
+
+  const source = /[a-z]/.test(character)
+    ? lowerLetters
+    : /[A-Z]/.test(character)
+      ? upperLetters
+      : /[0-9]/.test(character)
+        ? digits
+        : null;
+
+  if (!source) {
+    return character;
+  }
+
+  let nextCharacter = character;
+
+  while (nextCharacter === character) {
+    nextCharacter = source[Math.floor(Math.random() * source.length)] || character;
+  }
+
+  return nextCharacter;
+};
+
+function GitHubMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="workspace__repo-icon"
+    >
+      <path d="M8 0C3.58 0 0 3.69 0 8.24c0 3.64 2.29 6.73 5.47 7.82.4.08.55-.18.55-.39 0-.19-.01-.83-.01-1.5-2.01.38-2.53-.5-2.69-.96-.09-.24-.48-.96-.82-1.15-.28-.16-.68-.56-.01-.57.63-.01 1.08.59 1.23.83.72 1.24 1.87.89 2.33.68.07-.53.28-.89.5-1.09-1.78-.21-3.64-.92-3.64-4.08 0-.9.31-1.64.82-2.22-.08-.21-.36-1.05.08-2.18 0 0 .67-.22 2.2.85A7.38 7.38 0 0 1 8 3.49c.68 0 1.37.09 2.01.27 1.53-1.07 2.2-.85 2.2-.85.44 1.13.16 1.97.08 2.18.51.58.82 1.31.82 2.22 0 3.17-1.87 3.87-3.65 4.08.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.47.55.39A8.27 8.27 0 0 0 16 8.24C16 3.69 12.42 0 8 0Z" />
+    </svg>
+  );
+}
+
+function PlayMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="history-surface__runner-icon"
+    >
+      <path d="M4 2.62v10.76c0 .48.52.78.93.53l8.42-5.38a.62.62 0 0 0 0-1.06L4.93 2.09A.62.62 0 0 0 4 2.62Z" />
+    </svg>
+  );
+}
+
+function PauseMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      fill="currentColor"
+      className="history-surface__runner-icon"
+    >
+      <path d="M4 2.5h3v11H4zm5 0h3v11H9z" />
+    </svg>
+  );
+}
 
 export function IdeaCanvas() {
   const runtimeConfig = readRuntimeConfig();
-  const containerRef = useRef<HTMLElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const brandRef = useRef<HTMLDivElement | null>(null);
-  const surfaceRef = useRef<HTMLDivElement | null>(null);
-  const footerRef = useRef<HTMLDivElement | null>(null);
-  const graphRef = useRef<GraphSnapshot | null>(null);
-  const viewportRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
-  const interactionRef = useRef<Interaction | null>(null);
-  const didCenterRef = useRef(false);
-  const [graph, setGraph] = useState<GraphSnapshot | null>(null);
-  const [selectedIdeaId, setSelectedIdeaId] = useState<string | null>(null);
-  const [viewport, setViewport] = useState<Viewport>({ x: 0, y: 0, scale: 1 });
-  const [dragging, setDragging] = useState(false);
-  const [statusLabel, setStatusLabel] = useState("Hydrating runtime config");
+  const realtimeConnectionStatus = useRealtimeConnectionStatus();
+  const themeMenuRef = useRef<HTMLDivElement | null>(null);
+  const promptCursorMarkerRef = useRef<HTMLSpanElement | null>(null);
+  const promptPlaceholderQuestionIndexRef = useRef(0);
   const [promptInput, setPromptInput] = useState("");
+  const [animatedPromptText, setAnimatedPromptText] = useState("");
+  const [promptInputFocused, setPromptInputFocused] = useState(false);
+  const [promptSelectionStart, setPromptSelectionStart] = useState(0);
+  const [promptCursorPosition, setPromptCursorPosition] = useState({
+    left: 0,
+    top: 0,
+    width: 16,
+    height: 24
+  });
   const [promptSubmitError, setPromptSubmitError] = useState<string | null>(null);
   const [historyFilter, setHistoryFilter] = useState<PromptHistoryFilter>("all");
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [activeSurface, setActiveSurface] = useState<WorkspaceSurface>("prompt");
-  const [historyInsets, setHistoryInsets] = useState<SurfaceInsets>({
-    top: 220,
-    bottom: 92,
-    left: 20,
-    right: 20
-  });
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const [, setStatusLabel] = useState("Ready to capture a prompt.");
 
-  const { data, loading, error, refetch } = useQuery<BootstrapResponse>(CANVAS_BOOTSTRAP_QUERY, {
-    fetchPolicy: "cache-and-network"
-  });
-
-  const [moveIdeaMutation] = useMutation<MoveIdeaResponse, MoveIdeaVariables>(MOVE_IDEA_MUTATION);
   const {
     data: promptsData,
     loading: promptsLoading,
@@ -391,9 +399,15 @@ export function IdeaCanvas() {
     refetch: refetchPrompts
   } = useQuery<PromptsResponse>(PROMPTS_QUERY, {
     variables: { limit: RECENT_PROMPTS_LIMIT },
-    fetchPolicy: "cache-and-network",
-    pollInterval: PROMPTS_POLL_INTERVAL_MS
+    fetchPolicy: "cache-and-network"
   });
+  const { data: workspaceSubscriptionData } = useSubscription<PromptWorkspaceSubscriptionResponse>(
+    PROMPT_WORKSPACE_SUBSCRIPTION,
+    {
+      variables: { limit: RECENT_PROMPTS_LIMIT }
+    }
+  );
+
   const [createPromptMutation, { loading: createPromptLoading }] = useMutation<
     CreatePromptResponse,
     CreatePromptVariables
@@ -413,145 +427,50 @@ export function IdeaCanvas() {
     ResumePromptRunnerResponse
   >(RESUME_PROMPT_RUNNER_MUTATION);
 
-  useEffect(() => {
-    viewportRef.current = viewport;
-  }, [viewport]);
-
-  useEffect(() => {
-    if (!data?.graphSnapshot) {
-      return;
-    }
-
-    setGraph(data.graphSnapshot);
-    graphRef.current = data.graphSnapshot;
-    setSelectedIdeaId((current) => current || data.graphSnapshot.ideas[0]?.id || null);
-    setStatusLabel("Live data from GraphQL + Postgres");
-  }, [data]);
-
-  useEffect(() => {
-    if (!graph || !containerRef.current || didCenterRef.current) {
-      return;
-    }
-
-    const bounds = containerRef.current.getBoundingClientRect();
-    const next = fitGraphToViewport(graph, bounds.width, bounds.height);
-    setViewport(next);
-    viewportRef.current = next;
-    didCenterRef.current = true;
-  }, [graph]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const container = containerRef.current;
-
-    if (!canvas || !container) {
-      return;
-    }
-
-    const resize = () => {
-      const rect = container.getBoundingClientRect();
-      const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.floor(rect.width * ratio);
-      canvas.height = Math.floor(rect.height * ratio);
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
-      drawGraph(canvas, graphRef.current, viewportRef.current, selectedIdeaId);
-    };
-
-    resize();
-
-    const observer = new ResizeObserver(() => resize());
-    observer.observe(container);
-
-    return () => observer.disconnect();
-  }, [selectedIdeaId]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    const brand = brandRef.current;
-    const surface = surfaceRef.current;
-    const footer = footerRef.current;
-
-    if (!container || !brand || !surface || !footer) {
-      return;
-    }
-
-    const updateInsets = () => {
-      const containerRect = container.getBoundingClientRect();
-      const brandRect = brand.getBoundingClientRect();
-      const surfaceRect = surface.getBoundingClientRect();
-      const footerRect = footer.getBoundingClientRect();
-      const baseGutter = containerRect.width <= 640 ? 16 : 20;
-      const centralLaneLeft = brandRect.right - containerRect.left + 20;
-      const centralLaneRight = containerRect.right - surfaceRect.left + 20;
-      const centralLaneWidth =
-        containerRect.width - centralLaneLeft - centralLaneRight;
-
-      const nextTop = brandRect.bottom - containerRect.top + 20;
-      const nextBottom = containerRect.bottom - footerRect.top + 16;
-
-      setHistoryInsets((current) => {
-        const roundedTop = Math.max(160, Math.round(nextTop));
-        const roundedBottom = Math.max(72, Math.round(nextBottom));
-        const roundedLeft =
-          centralLaneWidth >= 720
-            ? Math.max(baseGutter, Math.round(centralLaneLeft))
-            : baseGutter;
-        const roundedRight =
-          centralLaneWidth >= 720
-            ? Math.max(baseGutter, Math.round(centralLaneRight))
-            : baseGutter;
-
-        if (
-          current.top === roundedTop &&
-          current.bottom === roundedBottom &&
-          current.left === roundedLeft &&
-          current.right === roundedRight
-        ) {
-          return current;
-        }
-
-        return {
-          top: roundedTop,
-          bottom: roundedBottom,
-          left: roundedLeft,
-          right: roundedRight
-        };
-      });
-    };
-
-    updateInsets();
-
-    const observer = new ResizeObserver(() => updateInsets());
-    observer.observe(container);
-    observer.observe(brand);
-    observer.observe(surface);
-    observer.observe(footer);
-    window.addEventListener("resize", updateInsets);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", updateInsets);
-    };
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-
-    if (!canvas) {
-      return;
-    }
-
-    drawGraph(canvas, graph, viewport, selectedIdeaId);
-  }, [graph, selectedIdeaId, viewport]);
-
-  const selectedIdea =
-    graph?.ideas.find((idea) => idea.id === selectedIdeaId) || graph?.ideas[0] || null;
-  const recentPrompts = promptsData?.prompts || [];
-  const promptRunnerState = promptsData?.promptRunnerState || null;
+  const workspaceSnapshot = workspaceSubscriptionData?.promptWorkspace;
+  const recentPrompts = workspaceSnapshot?.prompts || promptsData?.prompts || [];
+  const promptRunnerState =
+    workspaceSnapshot?.promptRunnerState || promptsData?.promptRunnerState || null;
   const filteredPrompts = recentPrompts.filter((prompt) =>
     matchesPromptHistoryFilter(prompt, historyFilter)
   );
+  const selectedPrompt =
+    filteredPrompts.find((prompt) => prompt.id === selectedPromptId) || filteredPrompts[0] || null;
+  const selectedPromptTransitions = selectedPrompt
+    ? getPromptTransitions(selectedPrompt).slice().reverse()
+    : [];
+  const selectedPromptAudit = selectedPrompt ? getPromptAuditSummary(selectedPrompt) : null;
+  const selectedPromptFailure = selectedPrompt ? getPromptFailureDetails(selectedPrompt) : null;
+  const selectedPromptRecovery = selectedPrompt ? getPromptRecoveryNote(selectedPrompt) : null;
+  const selectedPromptGit = selectedPrompt ? getPromptGitSummary(selectedPrompt) : null;
+  const latestSelectedTransition = selectedPrompt ? getLatestPromptTransition(selectedPrompt) : null;
+  const promptActionLoading =
+    cancelPromptLoading ||
+    retryPromptLoading ||
+    pausePromptRunnerLoading ||
+    resumePromptRunnerLoading;
+  const promptCursorDisplayValue =
+    promptInput.length > 0 ? promptInput : promptInputFocused ? "" : animatedPromptText;
+  const promptCursorIndex =
+    promptInput.length > 0
+      ? Math.min(promptSelectionStart, promptInput.length)
+      : promptInputFocused
+        ? 0
+        : animatedPromptText.length;
+  const promptCursorLeadingText = promptCursorDisplayValue.slice(0, promptCursorIndex);
+  const promptCursorTrailingText = promptCursorDisplayValue.slice(promptCursorIndex);
+  const showPromptCursor = promptInputFocused || promptInput.length === 0;
+  const runnerStatusTone = promptRunnerState?.paused
+    ? "workspace__footer-note--warning"
+    : promptRunnerState?.inFlight
+      ? "workspace__footer-note--warning"
+      : "workspace__footer-note--positive";
+  const runnerStatusLabel = promptRunnerState?.paused
+    ? "Paused"
+    : promptRunnerState?.inFlight
+      ? "Active"
+      : "Ready";
+
   const promptCounts = recentPrompts.reduce(
     (summary, prompt) => {
       if (prompt.status === "completed") {
@@ -573,11 +492,6 @@ export function IdeaCanvas() {
     { active: 0, queued: 0, completed: 0, failed: 0, cancelled: 0 }
   );
 
-  const selectedConnections = graph?.connections.filter(
-    (connection) =>
-      connection.sourceId === selectedIdea?.id || connection.targetId === selectedIdea?.id
-  ) || [];
-
   useEffect(() => {
     if (!filteredPrompts.length) {
       setSelectedPromptId(null);
@@ -591,444 +505,160 @@ export function IdeaCanvas() {
     );
   }, [filteredPrompts]);
 
-  const selectedPrompt =
-    filteredPrompts.find((prompt) => prompt.id === selectedPromptId) || filteredPrompts[0] || null;
-  const selectedPromptTransitions = selectedPrompt ? getPromptTransitions(selectedPrompt) : [];
-  const selectedPromptAudit = selectedPrompt ? getPromptAuditSummary(selectedPrompt) : null;
-  const selectedPromptFailure = selectedPrompt ? getPromptFailureDetails(selectedPrompt) : null;
-  const selectedPromptRecovery = selectedPrompt ? getPromptRecoveryNote(selectedPrompt) : null;
-  const selectedPromptGit = selectedPrompt ? getPromptGitSummary(selectedPrompt) : null;
-  const latestSelectedTransition = selectedPrompt ? getLatestPromptTransition(selectedPrompt) : null;
-  const promptActionLoading =
-    cancelPromptLoading ||
-    retryPromptLoading ||
-    pausePromptRunnerLoading ||
-    resumePromptRunnerLoading;
-  const runnerStatusTone = promptRunnerState?.paused
-    ? "prompt-status--cancelled"
-    : promptRunnerState?.inFlight
-      ? "prompt-status--writing"
-      : "prompt-status--completed";
-  const runnerStatusLabel = promptRunnerState?.paused
-    ? "Runner paused"
-    : promptRunnerState?.inFlight
-      ? "Runner active"
-      : "Runner ready";
-  const renderPromptHistoryPanel = () => (
-    <div className="glass-panel">
-      <div className="panel-content prompt-list">
-        <div className="prompt-list__header">
-          <div>
-            <p className="eyebrow">Prompt history</p>
-            <p className="prompt-panel__subtitle">
-              Inspect queue health, recovery notes, and recent run outcomes.
-            </p>
-          </div>
-          <div className="prompt-list__header-meta">
-            <span className="prompt-list__meta">
-              {promptsLoading && !recentPrompts.length
-                ? "Loading..."
-                : `${recentPrompts.length} loaded`}
-            </span>
-            {promptRunnerState ? (
-              <span className={`prompt-status ${runnerStatusTone}`}>
-                {runnerStatusLabel}
-              </span>
-            ) : null}
-          </div>
-        </div>
-
-        {promptsError ? (
-          <p className="prompt-list__empty">
-            Prompt status unavailable: {promptsError.message}
-          </p>
-        ) : recentPrompts.length ? (
-          <>
-            <div className="prompt-filters" role="tablist" aria-label="Prompt history filter">
-              {promptHistoryFilters.map((filter) => (
-                <button
-                  key={filter.id}
-                  type="button"
-                  className="prompt-filter"
-                  data-active={historyFilter === filter.id}
-                  onClick={() => setHistoryFilter(filter.id)}
-                >
-                  {filter.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="prompt-history__summary">
-              <div className="prompt-history__summary-card">
-                <span className="prompt-history__summary-label">Active</span>
-                <strong>{promptCounts.active}</strong>
-              </div>
-              <div className="prompt-history__summary-card">
-                <span className="prompt-history__summary-label">Queued</span>
-                <strong>{promptCounts.queued}</strong>
-              </div>
-              <div className="prompt-history__summary-card">
-                <span className="prompt-history__summary-label">Completed</span>
-                <strong>{promptCounts.completed}</strong>
-              </div>
-              <div className="prompt-history__summary-card">
-                <span className="prompt-history__summary-label">Failed</span>
-                <strong>{promptCounts.failed}</strong>
-              </div>
-              <div className="prompt-history__summary-card">
-                <span className="prompt-history__summary-label">Cancelled</span>
-                <strong>{promptCounts.cancelled}</strong>
-              </div>
-            </div>
-
-            {filteredPrompts.length ? (
-              <div className="prompt-history__grid">
-                <div className="prompt-list__items prompt-list__items--history">
-                  {filteredPrompts.map((prompt) => {
-                    const latestTransition = getLatestPromptTransition(prompt);
-                    const failure = getPromptFailureDetails(prompt);
-                    const auditSummary = getPromptAuditSummary(prompt);
-
-                    return (
-                      <button
-                        type="button"
-                        className="prompt-item prompt-item--interactive"
-                        data-selected={selectedPrompt?.id === prompt.id}
-                        key={prompt.id}
-                        onClick={() => setSelectedPromptId(prompt.id)}
-                      >
-                        <div className="prompt-item__row">
-                          <span className={`prompt-status prompt-status--${prompt.status}`}>
-                            {formatPromptStatus(prompt.status)}
-                          </span>
-                          <span className="prompt-item__time">
-                            {formatPromptTime(prompt.createdAt)}
-                          </span>
-                        </div>
-
-                        <p className="prompt-item__content">{prompt.content}</p>
-
-                        <p className="prompt-item__subtext">
-                          {failure.message || latestTransition?.reason || auditSummary.summary}
-                        </p>
-
-                        <div className="prompt-item__meta">
-                          <span>#{prompt.id.slice(0, 8)}</span>
-                          <span>{formatPromptDuration(prompt)}</span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {selectedPrompt ? (
-                  <aside className="prompt-detail">
-                    <div className="prompt-detail__header">
-                      <div>
-                        <p className="eyebrow">Selected prompt</p>
-                        <h3>#{selectedPrompt.id.slice(0, 8)}</h3>
-                      </div>
-                      <span className={`prompt-status prompt-status--${selectedPrompt.status}`}>
-                        {formatPromptStatus(selectedPrompt.status)}
-                      </span>
-                    </div>
-
-                    <p className="prompt-detail__content">{selectedPrompt.content}</p>
-
-                    <div className="prompt-detail__actions">
-                      <button
-                        type="button"
-                        onClick={handleTogglePromptRunner}
-                        disabled={!promptRunnerState || promptActionLoading}
-                      >
-                        {promptRunnerState?.paused ? "Resume runner" : "Pause runner"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancelPrompt}
-                        disabled={!canCancelPrompt(selectedPrompt) || promptActionLoading}
-                      >
-                        Cancel prompt
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleRetryPrompt}
-                        disabled={!canRetryPrompt(selectedPrompt) || promptActionLoading}
-                      >
-                        Retry prompt
-                      </button>
-                    </div>
-
-                    <div className="prompt-detail__stats">
-                      <div className="prompt-detail__stat">
-                        <span className="prompt-detail__label">Submitted</span>
-                        <span className="prompt-detail__value">
-                          {formatPromptTime(selectedPrompt.createdAt)}
-                        </span>
-                      </div>
-                      <div className="prompt-detail__stat">
-                        <span className="prompt-detail__label">Started</span>
-                        <span className="prompt-detail__value">
-                          {selectedPrompt.startedAt
-                            ? formatPromptTime(selectedPrompt.startedAt)
-                            : "Not started"}
-                        </span>
-                      </div>
-                      <div className="prompt-detail__stat">
-                        <span className="prompt-detail__label">Finished</span>
-                        <span className="prompt-detail__value">
-                          {selectedPrompt.finishedAt
-                            ? formatPromptTime(selectedPrompt.finishedAt)
-                            : "In progress"}
-                        </span>
-                      </div>
-                      <div className="prompt-detail__stat">
-                        <span className="prompt-detail__label">Duration</span>
-                        <span className="prompt-detail__value">
-                          {formatPromptDuration(selectedPrompt)}
-                        </span>
-                      </div>
-                      <div className="prompt-detail__stat">
-                        <span className="prompt-detail__label">Latest stage</span>
-                        <span className="prompt-detail__value">
-                          {selectedPromptFailure?.stage ||
-                            latestSelectedTransition?.status ||
-                            "Queued"}
-                        </span>
-                      </div>
-                      <div className="prompt-detail__stat">
-                        <span className="prompt-detail__label">Repo impact</span>
-                        <span className="prompt-detail__value">
-                          {selectedPromptAudit?.summary || "No repo changes recorded"}
-                        </span>
-                      </div>
-                    </div>
-
-                    {selectedPromptGit?.branch || selectedPromptGit?.sha ? (
-                      <p className="prompt-detail__hint">
-                        Git: {selectedPromptGit.branch || "unknown branch"}
-                        {selectedPromptGit.sha ? ` @ ${selectedPromptGit.sha.slice(0, 8)}` : ""}
-                      </p>
-                    ) : null}
-
-                    {promptRunnerState ? (
-                      <div className="prompt-detail__runner">
-                        <p className="prompt-detail__hint">
-                          Runner branch: {promptRunnerState.automationBranch}
-                        </p>
-                        <p className="prompt-detail__hint">
-                          Worktrees: {promptRunnerState.worktreeRoot}
-                        </p>
-                        {promptRunnerState.activePromptId ? (
-                          <p className="prompt-detail__hint">
-                            Active prompt: #{promptRunnerState.activePromptId.slice(0, 8)}
-                          </p>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {selectedPromptRecovery ? (
-                      <p className="prompt-detail__recovery">{selectedPromptRecovery}</p>
-                    ) : null}
-
-                    {selectedPromptFailure?.message ? (
-                      <p className="prompt-detail__error">{selectedPromptFailure.message}</p>
-                    ) : null}
-
-                    {selectedPromptTransitions.length ? (
-                      <div className="prompt-detail__timeline">
-                        {selectedPromptTransitions.slice(-5).map((transition) => (
-                          <div
-                            className="prompt-detail__step"
-                            key={`${transition.status}-${transition.at}`}
-                          >
-                            <div className="prompt-detail__step-row">
-                              <span className="prompt-detail__label">
-                                {formatPromptStatus(transition.status as PromptStatus)}
-                              </span>
-                              <span className="prompt-item__time">
-                                {formatPromptTime(transition.at)}
-                              </span>
-                            </div>
-                            <p className="prompt-detail__reason">{transition.reason}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="prompt-detail__hint">
-                        Lifecycle details will appear here once the runner starts processing.
-                      </p>
-                    )}
-                  </aside>
-                ) : null}
-              </div>
-            ) : (
-              <p className="prompt-list__empty">No prompts match the current filter.</p>
-            )}
-          </>
-        ) : (
-          <p className="prompt-list__empty">
-            No prompts queued yet. The next submitted idea will appear here.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-
-  const syncNodePosition = async (ideaId: string) => {
-    const idea = graphRef.current?.ideas.find((item) => item.id === ideaId);
-
-    if (!idea) {
+  useEffect(() => {
+    if (!themeMenuOpen) {
       return;
     }
 
-    try {
-      await moveIdeaMutation({
-        variables: {
-          input: {
-            id: idea.id,
-            x: Number(idea.x.toFixed(2)),
-            y: Number(idea.y.toFixed(2))
-          }
-        }
-      });
-      setStatusLabel(`Synced ${idea.title}`);
-    } catch (_error) {
-      setStatusLabel("Position sync failed");
-    }
-  };
-
-  const resetView = () => {
-    if (!graph || !containerRef.current) {
-      return;
-    }
-
-    const rect = containerRef.current.getBoundingClientRect();
-    const next = fitGraphToViewport(graph, rect.width, rect.height);
-    setViewport(next);
-    viewportRef.current = next;
-    drawGraph(canvasRef.current, graphRef.current, next, selectedIdeaId);
-  };
-
-  const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const point = getPointerPoint(event);
-    const currentGraph = graphRef.current;
-    const currentViewport = viewportRef.current;
-
-    if (!currentGraph) {
-      return;
-    }
-
-    const hit = findIdeaAtPoint(currentGraph.ideas, point, currentViewport);
-    event.currentTarget.setPointerCapture(event.pointerId);
-
-    if (hit) {
-      const worldPoint = screenToWorld(point, currentViewport);
-      interactionRef.current = {
-        type: "drag-node",
-        pointerId: event.pointerId,
-        nodeId: hit.id,
-        startWorld: worldPoint,
-        nodeOrigin: { x: hit.x, y: hit.y },
-        moved: false
-      };
-      setSelectedIdeaId(hit.id);
-      setDragging(true);
-      return;
-    }
-
-    interactionRef.current = {
-      type: "pan",
-      pointerId: event.pointerId,
-      start: point,
-      origin: currentViewport
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!themeMenuRef.current?.contains(event.target as Node)) {
+        setThemeMenuOpen(false);
+      }
     };
-    setDragging(true);
-  };
 
-  const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const interaction = interactionRef.current;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setThemeMenuOpen(false);
+      }
+    };
 
-    if (!interaction || interaction.pointerId !== event.pointerId) {
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [themeMenuOpen]);
+
+  useEffect(() => {
+    if (activeSurface !== "prompt" || promptInputFocused || promptInput.length > 0) {
+      setAnimatedPromptText("");
       return;
     }
 
-    const point = getPointerPoint(event);
+    let cancelled = false;
+    let timeoutId: number | null = null;
 
-    if (interaction.type === "pan") {
-      const next = {
-        ...interaction.origin,
-        x: interaction.origin.x + point.x - interaction.start.x,
-        y: interaction.origin.y + point.y - interaction.start.y
-      };
-      setViewport(next);
-      viewportRef.current = next;
+    const sleep = (delay: number) =>
+      new Promise<void>((resolve) => {
+        timeoutId = window.setTimeout(() => {
+          timeoutId = null;
+          resolve();
+        }, delay);
+      });
+
+    const runPlaceholderLoop = async () => {
+      let questionIndex =
+        promptPlaceholderQuestionIndexRef.current % PROMPT_ZEN_PLACEHOLDER_QUESTIONS.length;
+
+      while (!cancelled) {
+        const question =
+          PROMPT_ZEN_PLACEHOLDER_QUESTIONS[questionIndex] ||
+          PROMPT_ZEN_PLACEHOLDER_QUESTIONS[0];
+        let nextText = "";
+
+        setAnimatedPromptText("");
+        await sleep(PROMPT_ZEN_TYPING_START_PAUSE_MS);
+
+        for (const character of question) {
+          if (cancelled) {
+            return;
+          }
+
+          if (!/\s/.test(character) && Math.random() < PROMPT_ZEN_TYPING_ERROR_RATE) {
+            nextText += getMistypedCharacter(character);
+            setAnimatedPromptText(nextText);
+            await sleep(getRandomTypingDelay(character));
+
+            if (cancelled) {
+              return;
+            }
+
+            nextText = nextText.slice(0, -1);
+            setAnimatedPromptText(nextText);
+            await sleep(PROMPT_ZEN_TYPING_CORRECTION_PAUSE_MS);
+          }
+
+          nextText += character;
+          setAnimatedPromptText(nextText);
+          await sleep(getRandomTypingDelay(character));
+        }
+
+        await sleep(PROMPT_ZEN_TYPING_END_PAUSE_MS);
+
+        while (!cancelled && nextText.length > 0) {
+          nextText = nextText.slice(0, -1);
+          setAnimatedPromptText(nextText);
+          await sleep(PROMPT_ZEN_TYPING_DELETE_MS);
+        }
+
+        questionIndex = (questionIndex + 1) % PROMPT_ZEN_PLACEHOLDER_QUESTIONS.length;
+        promptPlaceholderQuestionIndexRef.current = questionIndex;
+      }
+    };
+
+    void runPlaceholderLoop();
+
+    return () => {
+      cancelled = true;
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [activeSurface, promptInput.length, promptInputFocused]);
+
+  useLayoutEffect(() => {
+    if (!showPromptCursor || activeSurface !== "prompt") {
       return;
     }
 
-    const world = screenToWorld(point, viewportRef.current);
-    const nextX = interaction.nodeOrigin.x + (world.x - interaction.startWorld.x);
-    const nextY = interaction.nodeOrigin.y + (world.y - interaction.startWorld.y);
-    interaction.moved = true;
+    const updatePromptCursorPosition = () => {
+      const marker = promptCursorMarkerRef.current;
 
-    setGraph((current) => {
-      if (!current) {
-        return current;
+      if (!marker) {
+        return;
       }
 
-      const ideas = current.ideas.map((idea) =>
-        idea.id === interaction.nodeId ? { ...idea, x: nextX, y: nextY } : idea
-      );
-      const next = { ...current, ideas };
-      graphRef.current = next;
-      return next;
-    });
-  };
+      const lineHeight = Number.parseFloat(window.getComputedStyle(marker).lineHeight) || 0;
+      const cursorHeight = Math.max(18, Math.round(lineHeight * 0.9));
+      const cursorWidth = Math.max(12, Math.round(lineHeight * 0.5));
+      const topOffset = Math.max(0, (lineHeight - cursorHeight) / 2);
 
-  const handlePointerUp = async (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    const interaction = interactionRef.current;
-
-    if (!interaction || interaction.pointerId !== event.pointerId) {
-      return;
-    }
-
-    interactionRef.current = null;
-    setDragging(false);
-
-    if (interaction.type === "drag-node" && interaction.moved) {
-      await syncNodePosition(interaction.nodeId);
-    }
-  };
-
-  const handleWheel = (event: ReactWheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-
-    const point = getPointerPoint(event);
-    const current = viewportRef.current;
-    const worldBefore = screenToWorld(point, current);
-    const scaleDelta = event.deltaY > 0 ? 0.92 : 1.08;
-    const nextScale = clamp(current.scale * scaleDelta, 0.35, 2.4);
-    const next = {
-      scale: nextScale,
-      x: point.x - worldBefore.x * nextScale,
-      y: point.y - worldBefore.y * nextScale
+      setPromptCursorPosition({
+        left: marker.offsetLeft,
+        top: marker.offsetTop + topOffset,
+        width: cursorWidth,
+        height: cursorHeight
+      });
     };
 
-    setViewport(next);
-    viewportRef.current = next;
-  };
+    updatePromptCursorPosition();
+    window.addEventListener("resize", updatePromptCursorPosition);
 
-  const handlePromptSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+    return () => {
+      window.removeEventListener("resize", updatePromptCursorPosition);
+    };
+  }, [
+    activeSurface,
+    promptCursorLeadingText,
+    promptCursorTrailingText,
+    promptCursorIndex,
+    showPromptCursor
+  ]);
 
-    const content = promptInput.trim();
-
+  const submitPrompt = async (rawContent: string) => {
+    const content = rawContent.trim();
     if (!content) {
-      setPromptSubmitError("Enter a prompt before queueing a run.");
+      const message = "Enter a prompt before queueing a run.";
+      setPromptSubmitError(message);
+      setStatusLabel(message);
       return;
     }
 
     setPromptSubmitError(null);
+    setStatusLabel("Queueing prompt.");
 
     try {
       const result = await createPromptMutation({
@@ -1047,15 +677,34 @@ export function IdeaCanvas() {
       setActiveSurface("history");
       setStatusLabel(
         createdPrompt
-          ? `Queued prompt ${createdPrompt.id.slice(0, 8)}`
-          : "Queued prompt"
+          ? `Queued prompt ${createdPrompt.id.slice(0, 8)}.`
+          : "Queued prompt."
       );
       await refetchPrompts();
     } catch (mutationError) {
-      setPromptSubmitError(
-        mutationError instanceof Error ? mutationError.message : "Failed to queue prompt."
-      );
+      const message =
+        mutationError instanceof Error ? mutationError.message : "Failed to queue prompt.";
+      setPromptSubmitError(message);
+      setStatusLabel(message);
     }
+  };
+
+  const handlePromptSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitPrompt(promptInput);
+  };
+
+  const handlePromptKeyDown = async (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+
+    event.preventDefault();
+    await submitPrompt(promptInput);
+  };
+
+  const syncPromptSelection = (selectionStart: number | null) => {
+    setPromptSelectionStart(selectionStart ?? 0);
   };
 
   const handleCancelPrompt = async () => {
@@ -1069,8 +718,8 @@ export function IdeaCanvas() {
       });
       setStatusLabel(
         result.data?.cancelPrompt
-          ? `Cancelled prompt ${result.data.cancelPrompt.id.slice(0, 8)}`
-          : "Cancelled prompt"
+          ? `Cancelled prompt ${result.data.cancelPrompt.id.slice(0, 8)}.`
+          : "Cancelled prompt."
       );
       await refetchPrompts();
     } catch (mutationError) {
@@ -1093,10 +742,11 @@ export function IdeaCanvas() {
       if (retriedPrompt) {
         setSelectedPromptId(retriedPrompt.id);
       }
+      setHistoryFilter("active");
       setStatusLabel(
         retriedPrompt
-          ? `Re-queued prompt ${retriedPrompt.id.slice(0, 8)}`
-          : "Re-queued prompt"
+          ? `Re-queued prompt ${retriedPrompt.id.slice(0, 8)}.`
+          : "Re-queued prompt."
       );
       await refetchPrompts();
     } catch (mutationError) {
@@ -1111,7 +761,7 @@ export function IdeaCanvas() {
       const nextState = promptRunnerState?.paused
         ? (await resumePromptRunnerMutation()).data?.resumePromptRunner || null
         : (await pausePromptRunnerMutation()).data?.pausePromptRunner || null;
-      setStatusLabel(nextState?.paused ? "Prompt runner paused" : "Prompt runner resumed");
+      setStatusLabel(nextState?.paused ? "Prompt runner paused." : "Prompt runner resumed.");
       await refetchPrompts();
     } catch (mutationError) {
       setStatusLabel(
@@ -1122,517 +772,395 @@ export function IdeaCanvas() {
     }
   };
 
-  if (loading && !graph) {
-    return (
-      <div className="loading-state">
-        <div className="glass-panel loading-state__panel">
-          <div className="panel-content">
-            <p className="eyebrow">Booting canvas</p>
-            <h1 className="title">Warming the field</h1>
-            <p className="subtitle">
-              Fetching runtime config and the initial graph snapshot from GraphQL.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="error-state">
-        <div className="glass-panel error-state__panel">
-          <div className="panel-content">
-            <p className="eyebrow">Bootstrap failed</p>
-            <h1 className="title">GraphQL is not reachable</h1>
-            <p className="subtitle">{error.message}</p>
-            <div className="toolbar" style={{ justifyContent: "flex-start", marginTop: 18 }}>
-              <button type="button" onClick={() => refetch()}>
-                Retry
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const liveRuntime = data?.runtimeConfig || runtimeConfig;
-
   return (
-    <main className="workspace" ref={containerRef}>
-      <canvas
-        ref={canvasRef}
-        className="workspace__canvas"
-        data-dragging={dragging}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onWheel={handleWheel}
-      />
-
-      <div className="workspace__overlay">
-        <div className="workspace__brand" ref={brandRef}>
-          <div className="glass-panel glass-panel--strong">
-            <div className="panel-content">
-              <p className="eyebrow">{liveRuntime.appTitle}</p>
-              <h1 className="title">{liveRuntime.graphTitle}</h1>
-              <p className="subtitle">{liveRuntime.graphSubtitle}</p>
-            </div>
+    <main className="workspace">
+      <div className="workspace__shell">
+        {promptsError ? (
+          <div className="workspace-panel workspace__banner" role="status">
+            Prompt state unavailable: {promptsError.message}
           </div>
+        ) : null}
 
-          <div className="row">
-            <div className="chip">
-              <span className="chip__dot" />
-              Runtime hydrated
-            </div>
-            <div className="chip">GraphQL endpoint: {liveRuntime.graphqlEndpoint}</div>
-            <div className="chip">Ideas: {graph?.ideas.length || 0}</div>
-            <div className="chip">Connections: {graph?.connections.length || 0}</div>
-          </div>
-        </div>
-
-        {activeSurface === "prompt" ? (
-          <div className="workspace__hero">
-            <div className="glass-panel glass-panel--strong">
-              <div className="panel-content prompt-hero">
-                <div className="prompt-hero__header">
-                  <div>
-                    <p className="eyebrow">New prompt</p>
-                    <h2 className="prompt-hero__title">Drop a thought into the store</h2>
-                    <p className="prompt-hero__subtitle">
-                      Start with the rough version. The agent will queue it, organize it,
-                      and wire it into the repository&apos;s mind map.
-                    </p>
-                  </div>
-                  <div className="prompt-hero__meta">
-                    <span className={`prompt-status ${runnerStatusTone}`}>
-                      {runnerStatusLabel}
+        <section className={`workspace__content workspace__content--${activeSurface}`}>
+          {activeSurface === "prompt" ? (
+            <div className="prompt-zen">
+              <form
+                className="workspace-panel workspace-panel--strong prompt-zen__form"
+                onSubmit={handlePromptSubmit}
+              >
+                <div className="prompt-zen__halo" aria-hidden="true" />
+                <div
+                  className="prompt-zen__core"
+                  data-empty={promptInput.length === 0}
+                >
+                  <div className="prompt-zen__cursor-measure" aria-hidden="true">
+                    {promptCursorLeadingText}
+                    <span className="prompt-zen__cursor-anchor" ref={promptCursorMarkerRef}>
+                      {"\u200b"}
                     </span>
-                    <span className="prompt-panel__polling">
-                      Polling every {PROMPTS_POLL_INTERVAL_MS / 1000}s
-                    </span>
+                    {promptCursorTrailingText || " "}
                   </div>
-                </div>
-
-                <div className="prompt-hero__summary">
-                  <div className="prompt-hero__summary-card">
-                    <span className="prompt-history__summary-label">Queued</span>
-                    <strong>{promptCounts.queued}</strong>
-                  </div>
-                  <div className="prompt-hero__summary-card">
-                    <span className="prompt-history__summary-label">Active</span>
-                    <strong>{promptCounts.active}</strong>
-                  </div>
-                  <div className="prompt-hero__summary-card">
-                    <span className="prompt-history__summary-label">Completed</span>
-                    <strong>{promptCounts.completed}</strong>
-                  </div>
-                </div>
-
-                <form className="prompt-form prompt-form--hero" onSubmit={handlePromptSubmit}>
+                  {showPromptCursor ? (
+                    <span
+                      className="prompt-zen__cursor"
+                      aria-hidden="true"
+                      style={{
+                        left: `${promptCursorPosition.left}px`,
+                        top: `${promptCursorPosition.top}px`,
+                        width: `${promptCursorPosition.width}px`,
+                        height: `${promptCursorPosition.height}px`
+                      }}
+                    />
+                  ) : null}
                   <label className="sr-only" htmlFor="prompt-input">
                     New prompt
                   </label>
                   <textarea
                     id="prompt-input"
                     name="prompt"
-                    rows={6}
+                    rows={8}
                     value={promptInput}
-                    onChange={(event) => setPromptInput(event.target.value)}
-                    placeholder="Capture the random thought, contradiction, question, or half-formed idea you do not want to lose."
+                    onChange={(event) => {
+                      setPromptInput(event.target.value);
+                      syncPromptSelection(event.currentTarget.selectionStart);
+                    }}
+                    onFocus={(event) => {
+                      setPromptInputFocused(true);
+                      syncPromptSelection(event.currentTarget.selectionStart);
+                    }}
+                    onBlur={() => setPromptInputFocused(false)}
+                    onClick={(event) => syncPromptSelection(event.currentTarget.selectionStart)}
+                    onKeyDown={handlePromptKeyDown}
+                    onKeyUp={(event) => syncPromptSelection(event.currentTarget.selectionStart)}
+                    onSelect={(event) => syncPromptSelection(event.currentTarget.selectionStart)}
+                    placeholder={promptInputFocused ? "" : animatedPromptText}
                   />
-
-                  {promptSubmitError ? (
-                    <p className="form-message form-message--error">{promptSubmitError}</p>
-                  ) : (
-                    <p className="form-message">
-                      Submitted prompts are queued in order, processed in isolated worktrees,
-                      and folded back into the document store.
-                    </p>
-                  )}
-
-                  <div className="toolbar prompt-form__actions prompt-form__actions--hero">
+                </div>
+                <button
+                  type="submit"
+                  className="sr-only"
+                  disabled={createPromptLoading || !promptInput.trim()}
+                >
+                  {createPromptLoading ? "Queueing..." : "Queue prompt"}
+                </button>
+              </form>
+            </div>
+          ) : (
+            <section className="history-surface">
+              <div className="history-surface__toolbar">
+                <div className="prompt-filters" role="tablist" aria-label="Prompt history filter">
+                  {promptHistoryFilters.map((filter) => (
                     <button
-                      type="submit"
-                      disabled={createPromptLoading || !promptInput.trim()}
+                      key={filter.id}
+                      type="button"
+                      className="prompt-filter"
+                      data-active={historyFilter === filter.id}
+                      onClick={() => setHistoryFilter(filter.id)}
                     >
-                      {createPromptLoading ? "Queueing..." : "Queue prompt"}
+                      {filter.label}
                     </button>
-                    <button type="button" onClick={() => setActiveSurface("history")}>
-                      Open prompt history
-                    </button>
-                  </div>
-                </form>
-
-                <div className="prompt-hero__foot">
-                  <p className="prompt-hero__hint">
-                    The field stays live underneath this prompt surface. Switch to
-                    <strong> Prompt history</strong> to inspect queue state, or
-                    <strong> Constellation field</strong> to explore the graph directly.
-                  </p>
-                  {selectedPrompt ? (
-                    <p className="prompt-hero__hint">
-                      Latest prompt: #{selectedPrompt.id.slice(0, 8)}{" "}
-                      <span className={`prompt-status prompt-status--${selectedPrompt.status}`}>
-                        {formatPromptStatus(selectedPrompt.status)}
-                      </span>
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {activeSurface === "history" ? (
-          <div
-            className="workspace__history"
-            style={{
-              top: historyInsets.top,
-              bottom: historyInsets.bottom,
-              left: historyInsets.left,
-              right: historyInsets.right
-            }}
-          >
-            {renderPromptHistoryPanel()}
-          </div>
-        ) : null}
-
-        {activeSurface === "field" ? (
-          <div className="workspace__field-note">
-            <div className="glass-panel">
-              <div className="panel-content">
-                <p className="eyebrow">Constellation field</p>
-                <p className="prompt-panel__subtitle">
-                  Explore the live graph, drag nodes, and inspect how ideas cluster together.
-                </p>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        <div className="workspace__controls">
-          <div className="glass-panel" ref={surfaceRef}>
-            <div className="panel-content">
-              <p className="eyebrow">Surface</p>
-              <div className="surface-toggle" role="tablist" aria-label="Workspace surface">
-                {workspaceSurfaces.map((surface) => (
-                  <button
-                    key={surface.id}
-                    type="button"
-                    className="surface-toggle__button"
-                    data-active={activeSurface === surface.id}
-                    onClick={() => setActiveSurface(surface.id)}
-                  >
-                    {surface.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-panel">
-            <div className="panel-content">
-              <div className="toolbar">
-                <button type="button" onClick={resetView}>
-                  Reset view
-                </button>
-                <button type="button" onClick={() => refetch()}>
-                  Refresh graph
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="glass-panel">
-            <div className="panel-content">
-              <p className="eyebrow">Themes</p>
-              <ThemeToggle />
-            </div>
-          </div>
-        </div>
-
-        <div className="workspace__footer" ref={footerRef}>
-          <div className="chip">
-            Surface: {activeSurface === "prompt"
-              ? "Prompt"
-              : activeSurface === "history"
-                ? "Prompt history"
-                : "Constellation field"}
-          </div>
-          <div className="chip">Drag empty space to pan</div>
-          <div className="chip">Scroll to zoom</div>
-          <div className="chip">Drag a node to persist its position</div>
-          <div className="chip">{statusLabel}</div>
-        </div>
-
-        {activeSurface === "field" && selectedIdea ? (
-          <div className="workspace__detail">
-            <div className="glass-panel glass-panel--strong">
-              <div className="panel-content detail-card">
-                <div>
-                  <p className="eyebrow">{selectedIdea.cluster}</p>
-                  <h2>{selectedIdea.title}</h2>
-                </div>
-
-                <p>{selectedIdea.description}</p>
-
-                <div className="stat-grid">
-                  <div className="stat">
-                    <span className="stat__label">Links</span>
-                    <span className="stat__value">{selectedConnections.length}</span>
-                  </div>
-                  <div className="stat">
-                    <span className="stat__label">Weight</span>
-                    <span className="stat__value">{selectedIdea.weight}</span>
-                  </div>
-                  <div className="stat">
-                    <span className="stat__label">Radius</span>
-                    <span className="stat__value">{Math.round(selectedIdea.radius)}</span>
-                  </div>
-                </div>
-
-                <div className="tag-list">
-                  {selectedIdea.tags.map((tag) => (
-                    <span className="tag" key={tag}>
-                      {tag}
-                    </span>
                   ))}
                 </div>
               </div>
+
+              <div className="prompt-summary__grid prompt-summary__grid--history">
+                <div className="stat-card">
+                  <span className="stat-card__label">Active</span>
+                  <strong>{promptCounts.active}</strong>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-card__label">Queued</span>
+                  <strong>{promptCounts.queued}</strong>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-card__label">Completed</span>
+                  <strong>{promptCounts.completed}</strong>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-card__label">Failed</span>
+                  <strong>{promptCounts.failed}</strong>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-card__label">Cancelled</span>
+                  <strong>{promptCounts.cancelled}</strong>
+                </div>
+              </div>
+
+              {filteredPrompts.length ? (
+                <div className="prompt-history__grid">
+                  <div className="prompt-list__column">
+                    <div className="prompt-list__items prompt-list__items--history">
+                      {filteredPrompts.map((prompt) => {
+                        const latestTransition = getLatestPromptTransition(prompt);
+                        const failure = getPromptFailureDetails(prompt);
+                        const auditSummary = getPromptAuditSummary(prompt);
+
+                        return (
+                          <button
+                            type="button"
+                            className="prompt-item prompt-item--interactive"
+                            data-selected={selectedPrompt?.id === prompt.id}
+                            key={prompt.id}
+                            onClick={() => setSelectedPromptId(prompt.id)}
+                          >
+                            <div className="prompt-item__row">
+                              <span className={`prompt-status prompt-status--${prompt.status}`}>
+                                {formatPromptStatus(prompt.status)}
+                              </span>
+                              <span className="prompt-item__time">
+                                {formatPromptTime(prompt.createdAt)}
+                              </span>
+                            </div>
+
+                            <p className="prompt-item__content">{prompt.content}</p>
+
+                            <p className="prompt-item__subtext">
+                              {failure.message || latestTransition?.reason || auditSummary.summary}
+                            </p>
+
+                            <div className="prompt-item__meta">
+                              <span>#{prompt.id.slice(0, 8)}</span>
+                              <span>{formatPromptDuration(prompt)}</span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <aside className="prompt-detail">
+                    {selectedPrompt ? (
+                      <>
+                        <div className="prompt-detail__header">
+                          <div>
+                            <p className="workspace__eyebrow">Selected prompt</p>
+                            <h3>#{selectedPrompt.id.slice(0, 8)}</h3>
+                          </div>
+                          <span className={`prompt-status prompt-status--${selectedPrompt.status}`}>
+                            {formatPromptStatus(selectedPrompt.status)}
+                          </span>
+                        </div>
+
+                        <p className="prompt-detail__content">{selectedPrompt.content}</p>
+
+                        {selectedPrompt.status === "failed" ? (
+                          <div className="prompt-detail__actions">
+                            <button
+                              type="button"
+                              onClick={handleCancelPrompt}
+                              disabled={!canCancelPrompt(selectedPrompt) || promptActionLoading}
+                            >
+                              Cancel prompt
+                            </button>
+                            <button
+                              type="button"
+                              className="prompt-detail__retry-button"
+                              onClick={handleRetryPrompt}
+                              disabled={!canRetryPrompt(selectedPrompt) || promptActionLoading}
+                            >
+                              Retry prompt
+                            </button>
+                          </div>
+                        ) : null}
+
+                        <div className="prompt-detail__stats">
+                          <div className="stat-card">
+                            <span className="stat-card__label">Submitted</span>
+                            <span className="stat-card__value">
+                              {formatPromptTime(selectedPrompt.createdAt)}
+                            </span>
+                          </div>
+                          <div className="stat-card">
+                            <span className="stat-card__label">Started</span>
+                            <span className="stat-card__value">
+                              {selectedPrompt.startedAt
+                                ? formatPromptTime(selectedPrompt.startedAt)
+                                : "Not started"}
+                            </span>
+                          </div>
+                          <div className="stat-card">
+                            <span className="stat-card__label">Finished</span>
+                            <span className="stat-card__value">
+                              {selectedPrompt.finishedAt
+                                ? formatPromptTime(selectedPrompt.finishedAt)
+                                : "In progress"}
+                            </span>
+                          </div>
+                          <div className="stat-card">
+                            <span className="stat-card__label">Duration</span>
+                            <span className="stat-card__value">
+                              {formatPromptDuration(selectedPrompt)}
+                            </span>
+                          </div>
+                          <div className="stat-card">
+                            <span className="stat-card__label">Latest stage</span>
+                            <span className="stat-card__value">
+                              {selectedPromptFailure?.stage ||
+                                latestSelectedTransition?.status ||
+                                "Queued"}
+                            </span>
+                          </div>
+                          <div className="stat-card">
+                            <span className="stat-card__label">Repo impact</span>
+                            <span className="stat-card__value">
+                              {selectedPromptAudit?.summary || "No repo changes recorded"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {(selectedPromptGit?.branch || selectedPromptGit?.sha) && (
+                          <p className="prompt-detail__hint">
+                            Git: {selectedPromptGit.branch || "unknown branch"}
+                            {selectedPromptGit.sha ? ` @ ${selectedPromptGit.sha.slice(0, 8)}` : ""}
+                          </p>
+                        )}
+
+                        {promptRunnerState ? (
+                          <div className="prompt-detail__runner">
+                            <p className="prompt-detail__hint">
+                              Runner branch: {promptRunnerState.automationBranch}
+                            </p>
+                            <p className="prompt-detail__hint">
+                              Worktrees: {promptRunnerState.worktreeRoot}
+                            </p>
+                            {promptRunnerState.activePromptId ? (
+                              <p className="prompt-detail__hint">
+                                Active prompt: #{promptRunnerState.activePromptId.slice(0, 8)}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {selectedPromptRecovery ? (
+                          <p className="prompt-detail__recovery">{selectedPromptRecovery}</p>
+                        ) : null}
+
+                        {selectedPromptFailure?.message ? (
+                          <p className="prompt-detail__error">{selectedPromptFailure.message}</p>
+                        ) : null}
+
+                        {selectedPromptTransitions.length ? (
+                          <div className="prompt-detail__timeline">
+                            {selectedPromptTransitions.slice(0, 6).map((transition) => (
+                              <div
+                                className="prompt-detail__step"
+                                key={`${transition.status}-${transition.at}`}
+                              >
+                                <div className="prompt-detail__step-row">
+                                  <span className="stat-card__label">
+                                    {formatPromptStatus(transition.status as PromptStatus)}
+                                  </span>
+                                  <span className="prompt-item__time">
+                                    {formatPromptTime(transition.at)}
+                                  </span>
+                                </div>
+                                <p className="prompt-detail__reason">{transition.reason}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="prompt-detail__hint">
+                            Lifecycle details will appear once the runner starts working.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <div className="prompt-detail__empty">
+                        <p className="workspace__eyebrow">No prompt selected</p>
+                        <p className="panel-copy">
+                          Choose a prompt from the list to inspect its lifecycle, audit, and git
+                          output.
+                        </p>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+              ) : (
+                <div className="history-surface__empty">
+                  <p className="panel-copy">
+                    {promptsLoading
+                      ? "Loading prompt history."
+                      : "No prompts match the current filter."}
+                  </p>
+                </div>
+              )}
+            </section>
+          )}
+        </section>
+
+        <header className="workspace-panel workspace__footer">
+          <div className="workspace__footer-primary">
+            <span className="workspace__footer-label">{runtimeConfig.appTitle}</span>
+            <div
+              className="surface-toggle workspace__footer-toggle"
+              role="tablist"
+              aria-label="Workspace view"
+            >
+              {workspaceSurfaces.map((surface) => (
+                <button
+                  key={surface.id}
+                  type="button"
+                  className="surface-toggle__button"
+                  data-active={activeSurface === surface.id}
+                  onClick={() => setActiveSurface(surface.id)}
+                >
+                  {surface.label}
+                </button>
+              ))}
             </div>
           </div>
-        ) : null}
+
+          <div className="workspace__footer-items">
+            <a
+              className="workspace__footer-note workspace__repo-link"
+              href={repoUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <span>{repoLabel}</span>
+              <GitHubMark />
+            </a>
+            <button
+              type="button"
+              className="workspace__footer-note workspace__runner-toggle"
+              onClick={handleTogglePromptRunner}
+              disabled={!promptRunnerState || promptActionLoading}
+              aria-label={promptRunnerState?.paused ? "Resume runner" : "Pause runner"}
+              title={promptRunnerState?.paused ? "Resume runner" : "Pause runner"}
+            >
+              {promptRunnerState?.paused ? <PlayMark /> : <PauseMark />}
+            </button>
+            <div
+              className="workspace__footer-menu"
+              data-open={themeMenuOpen}
+              ref={themeMenuRef}
+            >
+              <button
+                type="button"
+                className="workspace__footer-note workspace__footer-menu-trigger"
+                aria-expanded={themeMenuOpen}
+                aria-haspopup="menu"
+                onClick={() => setThemeMenuOpen((current) => !current)}
+              >
+                <span>Theme</span>
+                <span className="workspace__footer-menu-caret" aria-hidden="true" />
+              </button>
+              <div
+                className="workspace__footer-menu-content"
+                hidden={!themeMenuOpen}
+              >
+                <ThemeToggle onSelect={() => setThemeMenuOpen(false)} />
+              </div>
+            </div>
+            <span className={`workspace__footer-note ${runnerStatusTone}`.trim()}>
+              {runnerStatusLabel}
+            </span>
+            <span className={`workspace__footer-note ${getRealtimeConnectionTone(realtimeConnectionStatus)}`.trim()}>
+              {formatRealtimeConnectionStatus(realtimeConnectionStatus)}
+            </span>
+          </div>
+        </header>
       </div>
     </main>
   );
-}
-
-function getPointerPoint(
-  event: ReactPointerEvent<HTMLCanvasElement> | ReactWheelEvent<HTMLCanvasElement>
-) {
-  const rect = event.currentTarget.getBoundingClientRect();
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  };
-}
-
-function screenToWorld(point: { x: number; y: number }, viewport: Viewport) {
-  return {
-    x: (point.x - viewport.x) / viewport.scale,
-    y: (point.y - viewport.y) / viewport.scale
-  };
-}
-
-function worldToScreen(point: { x: number; y: number }, viewport: Viewport) {
-  return {
-    x: point.x * viewport.scale + viewport.x,
-    y: point.y * viewport.scale + viewport.y
-  };
-}
-
-function fitGraphToViewport(
-  graph: GraphSnapshot,
-  width: number,
-  height: number
-): Viewport {
-  if (!graph.ideas.length) {
-    return { x: width / 2, y: height / 2, scale: 1 };
-  }
-
-  const xs = graph.ideas.map((idea) => idea.x);
-  const ys = graph.ideas.map((idea) => idea.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const graphWidth = Math.max(maxX - minX, 1);
-  const graphHeight = Math.max(maxY - minY, 1);
-  const scale = clamp(
-    Math.min(width / (graphWidth + 300), height / (graphHeight + 300)),
-    0.5,
-    1.4
-  );
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
-
-  return {
-    scale,
-    x: width / 2 - centerX * scale,
-    y: height / 2 - centerY * scale
-  };
-}
-
-function findIdeaAtPoint(
-  ideas: IdeaNode[],
-  point: { x: number; y: number },
-  viewport: Viewport
-) {
-  const ordered = [...ideas].reverse();
-
-  return ordered.find((idea) => {
-    const screen = worldToScreen({ x: idea.x, y: idea.y }, viewport);
-    const radius = idea.radius * viewport.scale;
-    const dx = point.x - screen.x;
-    const dy = point.y - screen.y;
-    return Math.sqrt(dx * dx + dy * dy) <= radius;
-  });
-}
-
-function drawGraph(
-  canvas: HTMLCanvasElement | null,
-  graph: GraphSnapshot | null,
-  viewport: Viewport,
-  selectedIdeaId: string | null
-) {
-  if (!canvas || !graph) {
-    return;
-  }
-
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    return;
-  }
-
-  const rect = canvas.getBoundingClientRect();
-  const ratio = window.devicePixelRatio || 1;
-
-  context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  context.clearRect(0, 0, rect.width, rect.height);
-
-  const dotColor = getCssVar("--canvas-dot", "rgba(255,255,255,0.08)");
-  const edgeColor = getCssVar("--edge", "rgba(255,255,255,0.2)");
-  const ringColor = getCssVar("--node-ring", "rgba(255,255,255,0.12)");
-  const selectionColor = getCssVar("--selection", "rgba(255, 140, 57, 0.24)");
-  const textColor = getCssVar("--text", "#ffffff");
-  const mutedColor = getCssVar("--muted", "#94a3b8");
-  const panelColor = getCssVar("--panel-strong", "rgba(12,12,20,0.8)");
-
-  drawGrid(context, rect.width, rect.height, viewport, dotColor);
-
-  const ideasById = new Map(graph.ideas.map((idea) => [idea.id, idea]));
-
-  for (const connection of graph.connections) {
-    const source = ideasById.get(connection.sourceId);
-    const target = ideasById.get(connection.targetId);
-
-    if (!source || !target) {
-      continue;
-    }
-
-    const sourceScreen = worldToScreen({ x: source.x, y: source.y }, viewport);
-    const targetScreen = worldToScreen({ x: target.x, y: target.y }, viewport);
-    const gradient = context.createLinearGradient(
-      sourceScreen.x,
-      sourceScreen.y,
-      targetScreen.x,
-      targetScreen.y
-    );
-
-    gradient.addColorStop(0, getClusterColor(source.cluster));
-    gradient.addColorStop(1, getClusterColor(target.cluster));
-
-    context.strokeStyle = gradient;
-    context.globalAlpha = 0.25 + connection.strength * 0.45;
-    context.lineWidth = 1 + connection.strength * 3;
-    context.beginPath();
-    context.moveTo(sourceScreen.x, sourceScreen.y);
-
-    const midX = (sourceScreen.x + targetScreen.x) / 2;
-    const midY =
-      (sourceScreen.y + targetScreen.y) / 2 -
-      Math.min(80, Math.abs(targetScreen.x - sourceScreen.x) * 0.1);
-
-    context.quadraticCurveTo(midX, midY, targetScreen.x, targetScreen.y);
-    context.stroke();
-
-    if (connection.label) {
-      context.save();
-      context.globalAlpha = 0.8;
-      context.font = '12px "IBM Plex Mono", monospace';
-      context.fillStyle = edgeColor;
-      context.fillText(connection.label, midX + 8, midY - 4);
-      context.restore();
-    }
-  }
-
-  context.globalAlpha = 1;
-
-  for (const idea of graph.ideas) {
-    const screen = worldToScreen({ x: idea.x, y: idea.y }, viewport);
-    const radius = idea.radius * viewport.scale;
-    const fill = getClusterColor(idea.cluster);
-
-    if (idea.id === selectedIdeaId) {
-      context.beginPath();
-      context.fillStyle = selectionColor;
-      context.arc(screen.x, screen.y, radius + 16, 0, Math.PI * 2);
-      context.fill();
-    }
-
-    const gradient = context.createRadialGradient(
-      screen.x - radius * 0.35,
-      screen.y - radius * 0.4,
-      radius * 0.1,
-      screen.x,
-      screen.y,
-      radius
-    );
-    gradient.addColorStop(0, fill);
-    gradient.addColorStop(1, panelColor);
-
-    context.beginPath();
-    context.fillStyle = gradient;
-    context.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
-    context.fill();
-
-    context.lineWidth = idea.id === selectedIdeaId ? 2.5 : 1.25;
-    context.strokeStyle = ringColor;
-    context.beginPath();
-    context.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
-    context.stroke();
-
-    context.fillStyle = textColor;
-    context.font = `600 ${clamp(radius * 0.24, 14, 22)}px "Space Grotesk", sans-serif`;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-
-    const lines = wrapText(context, idea.title, radius * 1.35);
-    lines.forEach((line, index) => {
-      const offset = (index - (lines.length - 1) / 2) * clamp(radius * 0.26, 16, 22);
-      context.fillText(line, screen.x, screen.y - 6 + offset);
-    });
-
-    if (idea.tags[0]) {
-      context.fillStyle = mutedColor;
-      context.font = `500 ${clamp(radius * 0.12, 11, 14)}px "IBM Plex Mono", monospace`;
-      context.fillText(idea.tags[0], screen.x, screen.y + radius * 0.45);
-    }
-  }
-}
-
-function drawGrid(
-  context: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  viewport: Viewport,
-  color: string
-) {
-  const spacing = 76 * viewport.scale;
-  const originX = viewport.x % spacing;
-  const originY = viewport.y % spacing;
-
-  context.fillStyle = color;
-
-  for (let x = originX; x < width; x += spacing) {
-    for (let y = originY; y < height; y += spacing) {
-      context.beginPath();
-      context.arc(x, y, 1.4, 0, Math.PI * 2);
-      context.fill();
-    }
-  }
 }

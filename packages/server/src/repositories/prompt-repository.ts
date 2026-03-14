@@ -1,4 +1,5 @@
 import { query, withTransaction } from "../db/pool";
+import { publishPromptWorkspaceEvent } from "../services/prompt-workspace-events";
 
 export const promptStatuses = [
   "queued",
@@ -155,7 +156,13 @@ export const createPrompt = async (content: string): Promise<Prompt> => {
     [normalizedContent]
   );
 
-  return toPrompt(result.rows[0]);
+  const prompt = toPrompt(result.rows[0]);
+  publishPromptWorkspaceEvent({
+    promptId: prompt.id,
+    reason: "Prompt created and queued.",
+    scope: "prompt"
+  });
+  return prompt;
 };
 
 const assertPromptStatus = (
@@ -266,7 +273,13 @@ export const claimNextQueuedPrompt = async (): Promise<Prompt | null> =>
       return null;
     }
 
-    return toPrompt(result.rows[0]);
+    const prompt = toPrompt(result.rows[0]);
+    publishPromptWorkspaceEvent({
+      promptId: prompt.id,
+      reason: "Prompt claimed for processing.",
+      scope: "prompt"
+    });
+    return prompt;
   });
 
 export const updatePrompt = async (
@@ -334,7 +347,13 @@ export const updatePrompt = async (
     throw new Error(`Prompt ${id} not found`);
   }
 
-  return toPrompt(result.rows[0]);
+  const prompt = toPrompt(result.rows[0]);
+  publishPromptWorkspaceEvent({
+    promptId: prompt.id,
+    reason: `Prompt updated to ${prompt.status}.`,
+    scope: "prompt"
+  });
+  return prompt;
 };
 
 export const cancelPrompt = async (id: string): Promise<Prompt> => {
@@ -344,7 +363,7 @@ export const cancelPrompt = async (id: string): Promise<Prompt> => {
     throw new Error(`Prompt ${id} not found`);
   }
 
-  assertPromptStatus(current, ["queued"], "Cancelling a prompt");
+  assertPromptStatus(current, ["queued", "failed"], "Cancelling a prompt");
 
   return updatePrompt(id, {
     status: "cancelled",

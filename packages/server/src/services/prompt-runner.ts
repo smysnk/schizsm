@@ -9,6 +9,7 @@ import {
   type PreparedPromptWorktree
 } from "./git-worktree";
 import { setPromptRunner } from "./prompt-runner-registry";
+import { publishPromptWorkspaceEvent } from "./prompt-workspace-events";
 import {
   formatCanvasValidationError,
   validateCanvasState,
@@ -360,7 +361,8 @@ const executeAuditSync = async ({
 
 export class PromptRunner {
   private timer: NodeJS.Timeout | null = null;
-  private inFlight = false;
+  private ticking = false;
+  private processingPrompt = false;
   private paused = false;
   private activePromptId: string | null = null;
   private activePromptStatus: PromptStatus | null = null;
@@ -408,15 +410,30 @@ export class PromptRunner {
 
     clearInterval(this.timer);
     this.timer = null;
+    publishPromptWorkspaceEvent({
+      reason: "Prompt runner stopped.",
+      promptId: this.activePromptId,
+      scope: "runner"
+    });
   }
 
   pause(): PromptRunnerStateSnapshot {
     this.paused = true;
+    publishPromptWorkspaceEvent({
+      reason: "Prompt runner paused by operator.",
+      promptId: this.activePromptId,
+      scope: "runner"
+    });
     return this.getState();
   }
 
   resume(): PromptRunnerStateSnapshot {
     this.paused = false;
+    publishPromptWorkspaceEvent({
+      reason: "Prompt runner resumed by operator.",
+      promptId: this.activePromptId,
+      scope: "runner"
+    });
     void this.tick();
     return this.getState();
   }
@@ -424,7 +441,7 @@ export class PromptRunner {
   getState(): PromptRunnerStateSnapshot {
     return {
       paused: this.paused,
-      inFlight: this.inFlight,
+      inFlight: this.processingPrompt,
       activePromptId: this.activePromptId,
       activePromptStatus: this.activePromptStatus,
       pollMs: env.promptRunnerPollMs,
@@ -436,11 +453,11 @@ export class PromptRunner {
   }
 
   private async tick() {
-    if (this.inFlight || this.paused) {
+    if (this.ticking || this.paused) {
       return;
     }
 
-    this.inFlight = true;
+    this.ticking = true;
 
     try {
       const prompt = await claimNextQueuedPrompt();
@@ -449,11 +466,12 @@ export class PromptRunner {
         return;
       }
 
+      this.processingPrompt = true;
       await this.processPrompt(prompt);
     } catch (error) {
       console.error("Prompt runner tick failed", error);
     } finally {
-      this.inFlight = false;
+      this.ticking = false;
     }
   }
 
@@ -785,8 +803,14 @@ export class PromptRunner {
 
       console.error(`Prompt ${prompt.id} failed`, error);
     } finally {
+      this.processingPrompt = false;
       this.activePromptId = null;
       this.activePromptStatus = null;
+      publishPromptWorkspaceEvent({
+        reason: "Prompt runner cleared active prompt state.",
+        promptId: prompt.id,
+        scope: "runner"
+      });
     }
   }
 }

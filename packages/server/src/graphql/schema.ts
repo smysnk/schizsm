@@ -9,6 +9,7 @@ export const typeDefs = `#graphql
     availableThemes: [String!]!
     canvasRefreshMs: Int!
     graphqlEndpoint: String!
+    graphqlWsEndpoint: String!
   }
 
   type IdeaNode {
@@ -79,6 +80,14 @@ export const typeDefs = `#graphql
     runnerSessionId: String!
   }
 
+  type PromptWorkspaceUpdate {
+    emittedAt: String!
+    reason: String!
+    promptId: ID
+    promptRunnerState: PromptRunnerState!
+    prompts: [Prompt!]!
+  }
+
   input MoveIdeaInput {
     id: ID!
     x: Float!
@@ -106,5 +115,9 @@ export const typeDefs = `#graphql
     retryPrompt(id: ID!): Prompt!
     pausePromptRunner: PromptRunnerState!
     resumePromptRunner: PromptRunnerState!
+  }
+
+  type Subscription {
+    promptWorkspace(limit: Int): PromptWorkspaceUpdate!
   }
 `;

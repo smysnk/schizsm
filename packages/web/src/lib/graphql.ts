@@ -8,6 +8,7 @@ export type RuntimeConfigShape = {
   availableThemes: string[];
   canvasRefreshMs: number;
   graphqlEndpoint: string;
+  graphqlWsEndpoint: string;
 };
 
 export type IdeaNode = {
@@ -77,6 +78,14 @@ export type PromptRecord = {
   updatedAt: string;
 };
 
+export type PromptWorkspaceUpdateRecord = {
+  emittedAt: string;
+  reason: string;
+  promptId: string | null;
+  promptRunnerState: PromptRunnerStateRecord;
+  prompts: PromptRecord[];
+};
+
 export const CANVAS_BOOTSTRAP_QUERY = gql`
   query CanvasBootstrap {
     runtimeConfig {
@@ -87,6 +96,7 @@ export const CANVAS_BOOTSTRAP_QUERY = gql`
       availableThemes
       canvasRefreshMs
       graphqlEndpoint
+      graphqlWsEndpoint
     }
     graphSnapshot {
       generatedAt
@@ -149,6 +159,38 @@ export const PROMPTS_QUERY = gql`
       errorMessage
       createdAt
       updatedAt
+    }
+  }
+`;
+
+export const PROMPT_WORKSPACE_SUBSCRIPTION = gql`
+  subscription PromptWorkspace($limit: Int) {
+    promptWorkspace(limit: $limit) {
+      emittedAt
+      reason
+      promptId
+      promptRunnerState {
+        paused
+        inFlight
+        activePromptId
+        activePromptStatus
+        pollMs
+        automationBranch
+        worktreeRoot
+        runnerSessionId
+      }
+      prompts {
+        id
+        content
+        status
+        metadata
+        audit
+        startedAt
+        finishedAt
+        errorMessage
+        createdAt
+        updatedAt
+      }
     }
   }
 `;

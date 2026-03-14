@@ -8,6 +8,7 @@ import {
   retryPrompt
 } from "../repositories/prompt-repository";
 import { getPromptRunner } from "../services/prompt-runner-registry";
+import { subscribePromptWorkspaceEvents } from "../services/prompt-workspace-events";
 import { jsonScalar } from "./json-scalar";
 
 const getPromptRunnerState = () =>
@@ -64,6 +65,21 @@ export const resolvers = {
     seedDemoGraph: async () => {
       await ensureDemoGraph();
       return getGraphSnapshot();
+    }
+  },
+  Subscription: {
+    promptWorkspace: {
+      subscribe: () => subscribePromptWorkspaceEvents(),
+      resolve: async (
+        event: { emittedAt: string; reason: string; promptId: string | null },
+        args: { limit?: number | null }
+      ) => ({
+        emittedAt: event.emittedAt,
+        reason: event.reason,
+        promptId: event.promptId,
+        promptRunnerState: getPromptRunnerState(),
+        prompts: await listPrompts(args.limit)
+      })
     }
   }
 };

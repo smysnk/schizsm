@@ -18,7 +18,7 @@ const ibmPlexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Schizm",
-  description: "Full-screen canvas for mapping how ideas connect."
+  description: "Prompt-driven workspace for maintaining a living Obsidian document store."
 };
 
 export default function RootLayout({

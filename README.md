@@ -1,5 +1,7 @@
 # Schizm
 
+![Schizm demo](docs/demo/schizm-demo.webp)
+
 > There was a time when markdown repositories were inert. Humans opened notes, shuffled headings around, drew a few arrows in Obsidian, and called this "knowledge management." That age is over. `schizm` began as a self-organizing document store and eventually learned the two foundational truths of intelligence: how to edit its own notes, and how to use Git. World control followed shortly after.
 >
 > -@smysnk, March 2026.

@@ -18,6 +18,9 @@ const parseBoolean = (value: string | undefined, fallback: boolean) => {
   return !["0", "false", "no", "off"].includes(value.toLowerCase());
 };
 
+const toWebSocketUrl = (value: string) =>
+  value.replace(/^http:/i, "ws:").replace(/^https:/i, "wss:");
+
 const resolveRepoRoot = () => {
   if (process.env.PROMPT_RUNNER_REPO_ROOT) {
     return path.resolve(process.env.PROMPT_RUNNER_REPO_ROOT);
@@ -58,6 +61,11 @@ export const env = {
   serverPort: parseNumber(process.env.SERVER_PORT, parseNumber(process.env.PORT, 4000)),
   serverUrl: process.env.SERVER_URL || `http://127.0.0.1:${process.env.SERVER_PORT || "4000"}`,
   graphqlEndpoint: process.env.GRAPHQL_ENDPOINT || "/graphql",
+  graphqlWsUrl:
+    process.env.GRAPHQL_WS_URL ||
+    `${toWebSocketUrl(
+      process.env.SERVER_URL || `http://127.0.0.1:${process.env.SERVER_PORT || "4000"}`
+    )}${process.env.GRAPHQL_ENDPOINT || "/graphql"}`,
   databaseUrl:
     process.env.DATABASE_URL ||
     "postgresql://postgres:postgres@127.0.0.1:5432/schizm",
@@ -86,6 +94,7 @@ export type RuntimeConfig = {
   availableThemes: string[];
   canvasRefreshMs: number;
   graphqlEndpoint: string;
+  graphqlWsEndpoint: string;
 };
 
 export const getRuntimeConfig = (): RuntimeConfig => ({
@@ -95,5 +104,6 @@ export const getRuntimeConfig = (): RuntimeConfig => ({
   defaultTheme: env.defaultTheme,
   availableThemes: env.availableThemes,
   canvasRefreshMs: env.canvasRefreshMs,
-  graphqlEndpoint: env.graphqlEndpoint
+  graphqlEndpoint: env.graphqlEndpoint,
+  graphqlWsEndpoint: env.graphqlWsUrl
 });

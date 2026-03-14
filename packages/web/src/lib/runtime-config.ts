@@ -6,6 +6,7 @@ export type PublicRuntimeConfig = {
   availableThemes: string[];
   canvasRefreshMs: number;
   graphqlEndpoint: string;
+  graphqlWsEndpoint: string;
 };
 
 declare global {
@@ -21,7 +22,8 @@ const fallbackConfig: PublicRuntimeConfig = {
   defaultTheme: "signal",
   availableThemes: ["signal", "paper", "midnight"],
   canvasRefreshMs: 30_000,
-  graphqlEndpoint: "/graphql"
+  graphqlEndpoint: "/graphql",
+  graphqlWsEndpoint: "ws://127.0.0.1:4000/graphql"
 };
 
 export const getRuntimeConfig = (): PublicRuntimeConfig => fallbackConfig;

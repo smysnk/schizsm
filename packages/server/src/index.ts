@@ -1,7 +1,12 @@
+import { createServer } from "node:http";
 import cors from "cors";
 import express from "express";
 import { ApolloServer } from "@apollo/server";
+import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
 import { expressMiddleware } from "@apollo/server/express4";
+import { makeExecutableSchema } from "@graphql-tools/schema";
+import { useServer } from "graphql-ws/lib/use/ws";
+import { WebSocketServer } from "ws";
 import { env } from "./config/env";
 import { runMigrations } from "./db/migrations";
 import { pool } from "./db/pool";
@@ -35,11 +40,37 @@ const startServer = async () => {
   }
 
   const app = express();
+  const httpServer = createServer(app);
   const promptRunner = new PromptRunner();
   setPromptRunner(promptRunner);
-  const server = new ApolloServer({
+  const schema = makeExecutableSchema({
     typeDefs,
     resolvers
+  });
+  const wsServer = new WebSocketServer({
+    server: httpServer,
+    path: env.graphqlEndpoint
+  });
+  const serverCleanup = useServer(
+    {
+      schema
+    },
+    wsServer
+  );
+  const server = new ApolloServer({
+    schema,
+    plugins: [
+      ApolloServerPluginDrainHttpServer({ httpServer }),
+      {
+        async serverWillStart() {
+          return {
+            async drainServer() {
+              await serverCleanup.dispose();
+            }
+          };
+        }
+      }
+    ]
   });
 
   await server.start();
@@ -60,8 +91,9 @@ const startServer = async () => {
     expressMiddleware(server)
   );
 
-  app.listen(env.serverPort, () => {
+  httpServer.listen(env.serverPort, () => {
     console.log(`GraphQL server ready at ${env.serverUrl}${env.graphqlEndpoint}`);
+    console.log(`GraphQL subscriptions ready at ${env.graphqlWsUrl}`);
     void promptRunner.start();
   });
 
