@@ -438,6 +438,16 @@ const syncControllerPathsFromBaseRef = async ({
   };
 };
 
+const restoreControllerOverlay = async (prepared: PreparedPromptWorktree) => {
+  await syncControllerPathsFromBaseRef({
+    repoRoot: prepared.repoRoot,
+    worktreePath: prepared.worktreePath,
+    baseRef: prepared.promptBranch,
+    promptBranch: prepared.baseRef,
+    documentStoreDir: prepared.documentStoreDir
+  });
+};
+
 const resolveBaseRef = async (repoRoot: string) => {
   for (const candidate of ["main", "master", "HEAD"]) {
     if (candidate === "HEAD" || (await branchExists(repoRoot, candidate))) {
@@ -580,6 +590,7 @@ export const finalizePromptWorktree = async (
     await runGit(prepared.repoRoot, ["push", prepared.remoteName, prepared.automationBranch]);
   }
 
+  await restoreControllerOverlay(prepared);
   await runGit(prepared.repoRoot, ["worktree", "remove", prepared.worktreePath]);
   await runGit(prepared.repoRoot, ["branch", "-D", prepared.promptBranch]);
 

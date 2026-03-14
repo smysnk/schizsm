@@ -291,3 +291,67 @@ test("preparePromptWorktree skips tracked paths matched by .gitignore during con
     await rm(rootDirectory, { recursive: true, force: true });
   }
 });
+
+test("finalizePromptWorktree removes a worktree after restoring controller overlay changes", async () => {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "schizm-git-worktree-finalize-"));
+  const repoRoot = path.join(rootDirectory, "repo");
+  const worktreeRoot = path.join(rootDirectory, "worktrees");
+
+  try {
+    await mkdir(repoRoot, { recursive: true });
+    await runGit(repoRoot, ["init", "-b", "main"]);
+    await runGit(repoRoot, ["config", "user.name", "Schizm Tests"]);
+    await runGit(repoRoot, ["config", "user.email", "schizm-tests@example.com"]);
+
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README\n", "utf8");
+    await mkdir(path.join(repoRoot, "obsidian-repository"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, "obsidian-repository", "audit.md"),
+      "# Prompt Audit Log\n",
+      "utf8"
+    );
+    await runGit(repoRoot, ["add", "README.md", "obsidian-repository/audit.md"]);
+    await runGit(repoRoot, ["commit", "-m", "Initial main state"]);
+
+    await runGit(repoRoot, ["branch", "codex/mindmap"]);
+    await runGit(repoRoot, ["checkout", "codex/mindmap"]);
+    await writeFile(path.join(repoRoot, "README.md"), "# Legacy README\n", "utf8");
+    await runGit(repoRoot, ["add", "README.md"]);
+    await runGit(repoRoot, ["commit", "-m", "Legacy automation branch"]);
+
+    await runGit(repoRoot, ["checkout", "main"]);
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README v2\n", "utf8");
+    await runGit(repoRoot, ["add", "README.md"]);
+    await runGit(repoRoot, ["commit", "-m", "Update main README"]);
+
+    const prepared = await preparePromptWorktree({
+      repoRoot,
+      worktreeRoot,
+      automationBranch: "codex/mindmap",
+      promptId: "finalize-123",
+      remoteName: "origin",
+      documentStoreDir: "obsidian-repository"
+    });
+
+    assert.match(await runGit(prepared.worktreePath, ["status", "--short"]), /README\.md/);
+
+    await writeFile(
+      path.join(prepared.worktreePath, "obsidian-repository", "note.md"),
+      "Finalize simulation.\n",
+      "utf8"
+    );
+    await runGit(prepared.worktreePath, ["add", "obsidian-repository/note.md"]);
+    await runGit(prepared.worktreePath, ["commit", "-m", "Add note in prompt branch"]);
+
+    const finalized = await finalizePromptWorktree(prepared);
+
+    assert.equal(finalized.worktreeRemoved, true);
+    assert.equal(finalized.promptBranchDeleted, true);
+    assert.equal(
+      await runGit(repoRoot, ["show", "codex/mindmap:obsidian-repository/note.md"]),
+      "Finalize simulation."
+    );
+  } finally {
+    await rm(rootDirectory, { recursive: true, force: true });
+  }
+});
