@@ -271,14 +271,16 @@ const buildAuditPayload = ({
     typeof parsedJson.recordedAt === "string" && parsedJson.recordedAt.trim()
       ? parsedJson.recordedAt.trim()
       : extractRecordedAt(rawSection);
-  const branch =
+  const branchFromJson =
     typeof parsedJson.branch === "string" && parsedJson.branch.trim()
       ? parsedJson.branch.trim()
-      : git.branch;
-  const sha =
+      : null;
+  const shaFromJson =
     typeof parsedJson.sha === "string" && parsedJson.sha.trim()
       ? parsedJson.sha.trim()
-      : git.sha;
+      : null;
+  const branch = git.branch || branchFromJson;
+  const sha = git.sha || shaFromJson;
   const payload: PromptAuditPayload = {
     promptId,
     recordedAt,
