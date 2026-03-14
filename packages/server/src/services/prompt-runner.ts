@@ -237,6 +237,8 @@ const executeCodex = async ({
     repoRoot,
     "-s",
     "danger-full-access",
+    "-c",
+    `model_reasoning_effort="${env.promptRunnerReasoningEffort}"`,
     "--color",
     "never",
     "--output-schema",

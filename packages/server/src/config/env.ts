@@ -69,6 +69,8 @@ export const env = {
   promptRunnerAutomationBranch:
     process.env.PROMPT_RUNNER_AUTOMATION_BRANCH || "codex/mindmap",
   promptRunnerRemoteName: process.env.PROMPT_RUNNER_REMOTE_NAME || "origin",
+  promptRunnerReasoningEffort:
+    process.env.PROMPT_RUNNER_REASONING_EFFORT || "medium",
   promptRunnerWorktreeRoot:
     process.env.PROMPT_RUNNER_WORKTREE_ROOT ||
     path.join(resolveRepoRoot(), ".codex-workdirs"),

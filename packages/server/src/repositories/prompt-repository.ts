@@ -387,7 +387,11 @@ export const retryPrompt = async (id: string): Promise<Prompt> => {
         retriedAt: new Date().toISOString(),
         previousStatus: current.status,
         retryCount: previousAttemptsValue + 1
-      }
+      },
+      failure: null,
+      execution: null,
+      auditSync: null,
+      worktree: null
     }
   });
 };
