@@ -82,6 +82,7 @@ type CreatePromptVariables = {
 };
 
 type PromptHistoryFilter = "all" | "active" | "completed" | "failed" | "cancelled";
+type WorkspaceSurface = "prompt" | "history" | "field";
 
 type PromptTransitionRecord = {
   status: string;
@@ -93,6 +94,11 @@ type Viewport = {
   x: number;
   y: number;
   scale: number;
+};
+
+type SurfaceInsets = {
+  top: number;
+  bottom: number;
 };
 
 type Interaction =
@@ -133,6 +139,11 @@ const promptHistoryFilters: Array<{ id: PromptHistoryFilter; label: string }> = 
   { id: "completed", label: "Completed" },
   { id: "failed", label: "Failed" },
   { id: "cancelled", label: "Cancelled" }
+];
+const workspaceSurfaces: Array<{ id: WorkspaceSurface; label: string }> = [
+  { id: "prompt", label: "Prompt" },
+  { id: "history", label: "Prompt history" },
+  { id: "field", label: "Constellation field" }
 ];
 
 const getClusterColor = (cluster: string) => {
@@ -342,6 +353,9 @@ export function IdeaCanvas() {
   const runtimeConfig = readRuntimeConfig();
   const containerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const brandRef = useRef<HTMLDivElement | null>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  const footerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<GraphSnapshot | null>(null);
   const viewportRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
   const interactionRef = useRef<Interaction | null>(null);
@@ -355,6 +369,11 @@ export function IdeaCanvas() {
   const [promptSubmitError, setPromptSubmitError] = useState<string | null>(null);
   const [historyFilter, setHistoryFilter] = useState<PromptHistoryFilter>("all");
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
+  const [activeSurface, setActiveSurface] = useState<WorkspaceSurface>("prompt");
+  const [historyInsets, setHistoryInsets] = useState<SurfaceInsets>({
+    top: 220,
+    bottom: 92
+  });
 
   const { data, loading, error, refetch } = useQuery<BootstrapResponse>(CANVAS_BOOTSTRAP_QUERY, {
     fetchPolicy: "cache-and-network"
@@ -444,6 +463,59 @@ export function IdeaCanvas() {
   }, [selectedIdeaId]);
 
   useEffect(() => {
+    const container = containerRef.current;
+    const brand = brandRef.current;
+    const controls = controlsRef.current;
+    const footer = footerRef.current;
+
+    if (!container || !brand || !controls || !footer) {
+      return;
+    }
+
+    const updateInsets = () => {
+      const containerRect = container.getBoundingClientRect();
+      const brandRect = brand.getBoundingClientRect();
+      const controlsRect = controls.getBoundingClientRect();
+      const footerRect = footer.getBoundingClientRect();
+
+      const nextTop =
+        Math.max(brandRect.bottom, controlsRect.bottom) - containerRect.top + 20;
+      const nextBottom = containerRect.bottom - footerRect.top + 16;
+
+      setHistoryInsets((current) => {
+        const roundedTop = Math.max(160, Math.round(nextTop));
+        const roundedBottom = Math.max(72, Math.round(nextBottom));
+
+        if (
+          current.top === roundedTop &&
+          current.bottom === roundedBottom
+        ) {
+          return current;
+        }
+
+        return {
+          top: roundedTop,
+          bottom: roundedBottom
+        };
+      });
+    };
+
+    updateInsets();
+
+    const observer = new ResizeObserver(() => updateInsets());
+    observer.observe(container);
+    observer.observe(brand);
+    observer.observe(controls);
+    observer.observe(footer);
+    window.addEventListener("resize", updateInsets);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateInsets);
+    };
+  }, []);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
 
     if (!canvas) {
@@ -512,6 +584,276 @@ export function IdeaCanvas() {
     retryPromptLoading ||
     pausePromptRunnerLoading ||
     resumePromptRunnerLoading;
+  const runnerStatusTone = promptRunnerState?.paused
+    ? "prompt-status--cancelled"
+    : promptRunnerState?.inFlight
+      ? "prompt-status--writing"
+      : "prompt-status--completed";
+  const runnerStatusLabel = promptRunnerState?.paused
+    ? "Runner paused"
+    : promptRunnerState?.inFlight
+      ? "Runner active"
+      : "Runner ready";
+  const renderPromptHistoryPanel = () => (
+    <div className="glass-panel">
+      <div className="panel-content prompt-list">
+        <div className="prompt-list__header">
+          <div>
+            <p className="eyebrow">Prompt history</p>
+            <p className="prompt-panel__subtitle">
+              Inspect queue health, recovery notes, and recent run outcomes.
+            </p>
+          </div>
+          <div className="prompt-list__header-meta">
+            <span className="prompt-list__meta">
+              {promptsLoading && !recentPrompts.length
+                ? "Loading..."
+                : `${recentPrompts.length} loaded`}
+            </span>
+            {promptRunnerState ? (
+              <span className={`prompt-status ${runnerStatusTone}`}>
+                {runnerStatusLabel}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {promptsError ? (
+          <p className="prompt-list__empty">
+            Prompt status unavailable: {promptsError.message}
+          </p>
+        ) : recentPrompts.length ? (
+          <>
+            <div className="prompt-filters" role="tablist" aria-label="Prompt history filter">
+              {promptHistoryFilters.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  className="prompt-filter"
+                  data-active={historyFilter === filter.id}
+                  onClick={() => setHistoryFilter(filter.id)}
+                >
+                  {filter.label}
+                </button>
+              ))}
+            </div>
+
+            <div className="prompt-history__summary">
+              <div className="prompt-history__summary-card">
+                <span className="prompt-history__summary-label">Active</span>
+                <strong>{promptCounts.active}</strong>
+              </div>
+              <div className="prompt-history__summary-card">
+                <span className="prompt-history__summary-label">Queued</span>
+                <strong>{promptCounts.queued}</strong>
+              </div>
+              <div className="prompt-history__summary-card">
+                <span className="prompt-history__summary-label">Completed</span>
+                <strong>{promptCounts.completed}</strong>
+              </div>
+              <div className="prompt-history__summary-card">
+                <span className="prompt-history__summary-label">Failed</span>
+                <strong>{promptCounts.failed}</strong>
+              </div>
+              <div className="prompt-history__summary-card">
+                <span className="prompt-history__summary-label">Cancelled</span>
+                <strong>{promptCounts.cancelled}</strong>
+              </div>
+            </div>
+
+            {filteredPrompts.length ? (
+              <div className="prompt-history__grid">
+                <div className="prompt-list__items prompt-list__items--history">
+                  {filteredPrompts.map((prompt) => {
+                    const latestTransition = getLatestPromptTransition(prompt);
+                    const failure = getPromptFailureDetails(prompt);
+                    const auditSummary = getPromptAuditSummary(prompt);
+
+                    return (
+                      <button
+                        type="button"
+                        className="prompt-item prompt-item--interactive"
+                        data-selected={selectedPrompt?.id === prompt.id}
+                        key={prompt.id}
+                        onClick={() => setSelectedPromptId(prompt.id)}
+                      >
+                        <div className="prompt-item__row">
+                          <span className={`prompt-status prompt-status--${prompt.status}`}>
+                            {formatPromptStatus(prompt.status)}
+                          </span>
+                          <span className="prompt-item__time">
+                            {formatPromptTime(prompt.createdAt)}
+                          </span>
+                        </div>
+
+                        <p className="prompt-item__content">{prompt.content}</p>
+
+                        <p className="prompt-item__subtext">
+                          {failure.message || latestTransition?.reason || auditSummary.summary}
+                        </p>
+
+                        <div className="prompt-item__meta">
+                          <span>#{prompt.id.slice(0, 8)}</span>
+                          <span>{formatPromptDuration(prompt)}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedPrompt ? (
+                  <aside className="prompt-detail">
+                    <div className="prompt-detail__header">
+                      <div>
+                        <p className="eyebrow">Selected prompt</p>
+                        <h3>#{selectedPrompt.id.slice(0, 8)}</h3>
+                      </div>
+                      <span className={`prompt-status prompt-status--${selectedPrompt.status}`}>
+                        {formatPromptStatus(selectedPrompt.status)}
+                      </span>
+                    </div>
+
+                    <p className="prompt-detail__content">{selectedPrompt.content}</p>
+
+                    <div className="prompt-detail__actions">
+                      <button
+                        type="button"
+                        onClick={handleTogglePromptRunner}
+                        disabled={!promptRunnerState || promptActionLoading}
+                      >
+                        {promptRunnerState?.paused ? "Resume runner" : "Pause runner"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelPrompt}
+                        disabled={!canCancelPrompt(selectedPrompt) || promptActionLoading}
+                      >
+                        Cancel prompt
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRetryPrompt}
+                        disabled={!canRetryPrompt(selectedPrompt) || promptActionLoading}
+                      >
+                        Retry prompt
+                      </button>
+                    </div>
+
+                    <div className="prompt-detail__stats">
+                      <div className="prompt-detail__stat">
+                        <span className="prompt-detail__label">Submitted</span>
+                        <span className="prompt-detail__value">
+                          {formatPromptTime(selectedPrompt.createdAt)}
+                        </span>
+                      </div>
+                      <div className="prompt-detail__stat">
+                        <span className="prompt-detail__label">Started</span>
+                        <span className="prompt-detail__value">
+                          {selectedPrompt.startedAt
+                            ? formatPromptTime(selectedPrompt.startedAt)
+                            : "Not started"}
+                        </span>
+                      </div>
+                      <div className="prompt-detail__stat">
+                        <span className="prompt-detail__label">Finished</span>
+                        <span className="prompt-detail__value">
+                          {selectedPrompt.finishedAt
+                            ? formatPromptTime(selectedPrompt.finishedAt)
+                            : "In progress"}
+                        </span>
+                      </div>
+                      <div className="prompt-detail__stat">
+                        <span className="prompt-detail__label">Duration</span>
+                        <span className="prompt-detail__value">
+                          {formatPromptDuration(selectedPrompt)}
+                        </span>
+                      </div>
+                      <div className="prompt-detail__stat">
+                        <span className="prompt-detail__label">Latest stage</span>
+                        <span className="prompt-detail__value">
+                          {selectedPromptFailure?.stage ||
+                            latestSelectedTransition?.status ||
+                            "Queued"}
+                        </span>
+                      </div>
+                      <div className="prompt-detail__stat">
+                        <span className="prompt-detail__label">Repo impact</span>
+                        <span className="prompt-detail__value">
+                          {selectedPromptAudit?.summary || "No repo changes recorded"}
+                        </span>
+                      </div>
+                    </div>
+
+                    {selectedPromptGit?.branch || selectedPromptGit?.sha ? (
+                      <p className="prompt-detail__hint">
+                        Git: {selectedPromptGit.branch || "unknown branch"}
+                        {selectedPromptGit.sha ? ` @ ${selectedPromptGit.sha.slice(0, 8)}` : ""}
+                      </p>
+                    ) : null}
+
+                    {promptRunnerState ? (
+                      <div className="prompt-detail__runner">
+                        <p className="prompt-detail__hint">
+                          Runner branch: {promptRunnerState.automationBranch}
+                        </p>
+                        <p className="prompt-detail__hint">
+                          Worktrees: {promptRunnerState.worktreeRoot}
+                        </p>
+                        {promptRunnerState.activePromptId ? (
+                          <p className="prompt-detail__hint">
+                            Active prompt: #{promptRunnerState.activePromptId.slice(0, 8)}
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {selectedPromptRecovery ? (
+                      <p className="prompt-detail__recovery">{selectedPromptRecovery}</p>
+                    ) : null}
+
+                    {selectedPromptFailure?.message ? (
+                      <p className="prompt-detail__error">{selectedPromptFailure.message}</p>
+                    ) : null}
+
+                    {selectedPromptTransitions.length ? (
+                      <div className="prompt-detail__timeline">
+                        {selectedPromptTransitions.slice(-5).map((transition) => (
+                          <div
+                            className="prompt-detail__step"
+                            key={`${transition.status}-${transition.at}`}
+                          >
+                            <div className="prompt-detail__step-row">
+                              <span className="prompt-detail__label">
+                                {formatPromptStatus(transition.status as PromptStatus)}
+                              </span>
+                              <span className="prompt-item__time">
+                                {formatPromptTime(transition.at)}
+                              </span>
+                            </div>
+                            <p className="prompt-detail__reason">{transition.reason}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="prompt-detail__hint">
+                        Lifecycle details will appear here once the runner starts processing.
+                      </p>
+                    )}
+                  </aside>
+                ) : null}
+              </div>
+            ) : (
+              <p className="prompt-list__empty">No prompts match the current filter.</p>
+            )}
+          </>
+        ) : (
+          <p className="prompt-list__empty">
+            No prompts queued yet. The next submitted idea will appear here.
+          </p>
+        )}
+      </div>
+    </div>
+  );
 
   const syncNodePosition = async (ideaId: string) => {
     const idea = graphRef.current?.ideas.find((item) => item.id === ideaId);
@@ -681,6 +1023,8 @@ export function IdeaCanvas() {
       if (createdPrompt) {
         setSelectedPromptId(createdPrompt.id);
       }
+      setHistoryFilter("active");
+      setActiveSurface("history");
       setStatusLabel(
         createdPrompt
           ? `Queued prompt ${createdPrompt.id.slice(0, 8)}`
@@ -809,7 +1153,7 @@ export function IdeaCanvas() {
       />
 
       <div className="workspace__overlay">
-        <div className="workspace__header">
+        <div className="workspace__brand" ref={brandRef}>
           <div className="glass-panel glass-panel--strong">
             <div className="panel-content">
               <p className="eyebrow">{liveRuntime.appTitle}</p>
@@ -827,334 +1171,143 @@ export function IdeaCanvas() {
             <div className="chip">Ideas: {graph?.ideas.length || 0}</div>
             <div className="chip">Connections: {graph?.connections.length || 0}</div>
           </div>
+        </div>
 
-          <div className="glass-panel">
-            <div className="panel-content prompt-panel">
-              <div className="prompt-panel__header">
-                <div>
-                  <p className="eyebrow">Prompt queue</p>
-                  <p className="prompt-panel__subtitle">
-                    Queue a Codex run to process and organize a new idea.
-                  </p>
-                </div>
-                <span className="prompt-panel__polling">
-                  Polling every {PROMPTS_POLL_INTERVAL_MS / 1000}s
-                </span>
-              </div>
-
-              <form className="prompt-form" onSubmit={handlePromptSubmit}>
-                <label className="sr-only" htmlFor="prompt-input">
-                  New prompt
-                </label>
-                <textarea
-                  id="prompt-input"
-                  name="prompt"
-                  rows={4}
-                  value={promptInput}
-                  onChange={(event) => setPromptInput(event.target.value)}
-                  placeholder="Describe the idea, contradiction, or concept the agent should fold into the repository."
-                />
-
-                {promptSubmitError ? (
-                  <p className="form-message form-message--error">{promptSubmitError}</p>
-                ) : (
-                  <p className="form-message">
-                    New prompts are appended to the queue and processed in order.
-                  </p>
-                )}
-
-                <div className="toolbar prompt-form__actions">
-                  <button
-                    type="submit"
-                    disabled={createPromptLoading || !promptInput.trim()}
-                  >
-                    {createPromptLoading ? "Queueing..." : "Queue prompt"}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          <div className="glass-panel">
-            <div className="panel-content prompt-list">
-              <div className="prompt-list__header">
-                <div>
-                  <p className="eyebrow">Prompt history</p>
-                  <p className="prompt-panel__subtitle">
-                    Inspect queue health, recovery notes, and recent run outcomes.
-                  </p>
-                </div>
-                <div className="prompt-list__header-meta">
-                  <span className="prompt-list__meta">
-                    {promptsLoading && !recentPrompts.length
-                      ? "Loading..."
-                      : `${recentPrompts.length} loaded`}
-                  </span>
-                  {promptRunnerState ? (
-                    <span
-                      className={`prompt-status ${
-                        promptRunnerState.paused
-                          ? "prompt-status--cancelled"
-                          : promptRunnerState.inFlight
-                            ? "prompt-status--writing"
-                            : "prompt-status--completed"
-                      }`}
-                    >
-                      {promptRunnerState.paused
-                        ? "Runner paused"
-                        : promptRunnerState.inFlight
-                          ? "Runner active"
-                          : "Runner ready"}
+        {activeSurface === "prompt" ? (
+          <div className="workspace__hero">
+            <div className="glass-panel glass-panel--strong">
+              <div className="panel-content prompt-hero">
+                <div className="prompt-hero__header">
+                  <div>
+                    <p className="eyebrow">New prompt</p>
+                    <h2 className="prompt-hero__title">Drop a thought into the store</h2>
+                    <p className="prompt-hero__subtitle">
+                      Start with the rough version. The agent will queue it, organize it,
+                      and wire it into the repository&apos;s mind map.
+                    </p>
+                  </div>
+                  <div className="prompt-hero__meta">
+                    <span className={`prompt-status ${runnerStatusTone}`}>
+                      {runnerStatusLabel}
                     </span>
+                    <span className="prompt-panel__polling">
+                      Polling every {PROMPTS_POLL_INTERVAL_MS / 1000}s
+                    </span>
+                  </div>
+                </div>
+
+                <div className="prompt-hero__summary">
+                  <div className="prompt-hero__summary-card">
+                    <span className="prompt-history__summary-label">Queued</span>
+                    <strong>{promptCounts.queued}</strong>
+                  </div>
+                  <div className="prompt-hero__summary-card">
+                    <span className="prompt-history__summary-label">Active</span>
+                    <strong>{promptCounts.active}</strong>
+                  </div>
+                  <div className="prompt-hero__summary-card">
+                    <span className="prompt-history__summary-label">Completed</span>
+                    <strong>{promptCounts.completed}</strong>
+                  </div>
+                </div>
+
+                <form className="prompt-form prompt-form--hero" onSubmit={handlePromptSubmit}>
+                  <label className="sr-only" htmlFor="prompt-input">
+                    New prompt
+                  </label>
+                  <textarea
+                    id="prompt-input"
+                    name="prompt"
+                    rows={6}
+                    value={promptInput}
+                    onChange={(event) => setPromptInput(event.target.value)}
+                    placeholder="Capture the random thought, contradiction, question, or half-formed idea you do not want to lose."
+                  />
+
+                  {promptSubmitError ? (
+                    <p className="form-message form-message--error">{promptSubmitError}</p>
+                  ) : (
+                    <p className="form-message">
+                      Submitted prompts are queued in order, processed in isolated worktrees,
+                      and folded back into the document store.
+                    </p>
+                  )}
+
+                  <div className="toolbar prompt-form__actions prompt-form__actions--hero">
+                    <button
+                      type="submit"
+                      disabled={createPromptLoading || !promptInput.trim()}
+                    >
+                      {createPromptLoading ? "Queueing..." : "Queue prompt"}
+                    </button>
+                    <button type="button" onClick={() => setActiveSurface("history")}>
+                      Open prompt history
+                    </button>
+                  </div>
+                </form>
+
+                <div className="prompt-hero__foot">
+                  <p className="prompt-hero__hint">
+                    The field stays live underneath this prompt surface. Switch to
+                    <strong> Prompt history</strong> to inspect queue state, or
+                    <strong> Constellation field</strong> to explore the graph directly.
+                  </p>
+                  {selectedPrompt ? (
+                    <p className="prompt-hero__hint">
+                      Latest prompt: #{selectedPrompt.id.slice(0, 8)}{" "}
+                      <span className={`prompt-status prompt-status--${selectedPrompt.status}`}>
+                        {formatPromptStatus(selectedPrompt.status)}
+                      </span>
+                    </p>
                   ) : null}
                 </div>
               </div>
-
-              {promptsError ? (
-                <p className="prompt-list__empty">
-                  Prompt status unavailable: {promptsError.message}
-                </p>
-              ) : recentPrompts.length ? (
-                <>
-                  <div className="prompt-filters" role="tablist" aria-label="Prompt history filter">
-                    {promptHistoryFilters.map((filter) => (
-                      <button
-                        key={filter.id}
-                        type="button"
-                        className="prompt-filter"
-                        data-active={historyFilter === filter.id}
-                        onClick={() => setHistoryFilter(filter.id)}
-                      >
-                        {filter.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="prompt-history__summary">
-                    <div className="prompt-history__summary-card">
-                      <span className="prompt-history__summary-label">Active</span>
-                      <strong>{promptCounts.active}</strong>
-                    </div>
-                    <div className="prompt-history__summary-card">
-                      <span className="prompt-history__summary-label">Queued</span>
-                      <strong>{promptCounts.queued}</strong>
-                    </div>
-                    <div className="prompt-history__summary-card">
-                      <span className="prompt-history__summary-label">Completed</span>
-                      <strong>{promptCounts.completed}</strong>
-                    </div>
-                    <div className="prompt-history__summary-card">
-                      <span className="prompt-history__summary-label">Failed</span>
-                      <strong>{promptCounts.failed}</strong>
-                    </div>
-                    <div className="prompt-history__summary-card">
-                      <span className="prompt-history__summary-label">Cancelled</span>
-                      <strong>{promptCounts.cancelled}</strong>
-                    </div>
-                  </div>
-
-                  {filteredPrompts.length ? (
-                    <div className="prompt-history__grid">
-                      <div className="prompt-list__items prompt-list__items--history">
-                        {filteredPrompts.map((prompt) => {
-                          const latestTransition = getLatestPromptTransition(prompt);
-                          const failure = getPromptFailureDetails(prompt);
-                          const auditSummary = getPromptAuditSummary(prompt);
-
-                          return (
-                            <button
-                              type="button"
-                              className="prompt-item prompt-item--interactive"
-                              data-selected={selectedPrompt?.id === prompt.id}
-                              key={prompt.id}
-                              onClick={() => setSelectedPromptId(prompt.id)}
-                            >
-                              <div className="prompt-item__row">
-                                <span
-                                  className={`prompt-status prompt-status--${prompt.status}`}
-                                >
-                                  {formatPromptStatus(prompt.status)}
-                                </span>
-                                <span className="prompt-item__time">
-                                  {formatPromptTime(prompt.createdAt)}
-                                </span>
-                              </div>
-
-                              <p className="prompt-item__content">{prompt.content}</p>
-
-                              <p className="prompt-item__subtext">
-                                {failure.message ||
-                                  latestTransition?.reason ||
-                                  auditSummary.summary}
-                              </p>
-
-                              <div className="prompt-item__meta">
-                                <span>#{prompt.id.slice(0, 8)}</span>
-                                <span>{formatPromptDuration(prompt)}</span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      {selectedPrompt ? (
-                        <aside className="prompt-detail">
-                          <div className="prompt-detail__header">
-                            <div>
-                              <p className="eyebrow">Selected prompt</p>
-                              <h3>#{selectedPrompt.id.slice(0, 8)}</h3>
-                            </div>
-                            <span
-                              className={`prompt-status prompt-status--${selectedPrompt.status}`}
-                            >
-                              {formatPromptStatus(selectedPrompt.status)}
-                            </span>
-                          </div>
-
-                          <p className="prompt-detail__content">{selectedPrompt.content}</p>
-
-                          <div className="prompt-detail__actions">
-                            <button
-                              type="button"
-                              onClick={handleTogglePromptRunner}
-                              disabled={!promptRunnerState || promptActionLoading}
-                            >
-                              {promptRunnerState?.paused ? "Resume runner" : "Pause runner"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleCancelPrompt}
-                              disabled={!canCancelPrompt(selectedPrompt) || promptActionLoading}
-                            >
-                              Cancel prompt
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleRetryPrompt}
-                              disabled={!canRetryPrompt(selectedPrompt) || promptActionLoading}
-                            >
-                              Retry prompt
-                            </button>
-                          </div>
-
-                          <div className="prompt-detail__stats">
-                            <div className="prompt-detail__stat">
-                              <span className="prompt-detail__label">Submitted</span>
-                              <span className="prompt-detail__value">
-                                {formatPromptTime(selectedPrompt.createdAt)}
-                              </span>
-                            </div>
-                            <div className="prompt-detail__stat">
-                              <span className="prompt-detail__label">Started</span>
-                              <span className="prompt-detail__value">
-                                {selectedPrompt.startedAt
-                                  ? formatPromptTime(selectedPrompt.startedAt)
-                                  : "Not started"}
-                              </span>
-                            </div>
-                            <div className="prompt-detail__stat">
-                              <span className="prompt-detail__label">Finished</span>
-                              <span className="prompt-detail__value">
-                                {selectedPrompt.finishedAt
-                                  ? formatPromptTime(selectedPrompt.finishedAt)
-                                  : "In progress"}
-                              </span>
-                            </div>
-                            <div className="prompt-detail__stat">
-                              <span className="prompt-detail__label">Duration</span>
-                              <span className="prompt-detail__value">
-                                {formatPromptDuration(selectedPrompt)}
-                              </span>
-                            </div>
-                            <div className="prompt-detail__stat">
-                              <span className="prompt-detail__label">Latest stage</span>
-                              <span className="prompt-detail__value">
-                                {selectedPromptFailure?.stage ||
-                                  latestSelectedTransition?.status ||
-                                  "Queued"}
-                              </span>
-                            </div>
-                            <div className="prompt-detail__stat">
-                              <span className="prompt-detail__label">Repo impact</span>
-                              <span className="prompt-detail__value">
-                                {selectedPromptAudit?.summary || "No repo changes recorded"}
-                              </span>
-                            </div>
-                          </div>
-
-                          {selectedPromptGit?.branch || selectedPromptGit?.sha ? (
-                            <p className="prompt-detail__hint">
-                              Git: {selectedPromptGit.branch || "unknown branch"}
-                              {selectedPromptGit.sha ? ` @ ${selectedPromptGit.sha.slice(0, 8)}` : ""}
-                            </p>
-                          ) : null}
-
-                          {promptRunnerState ? (
-                            <div className="prompt-detail__runner">
-                              <p className="prompt-detail__hint">
-                                Runner branch: {promptRunnerState.automationBranch}
-                              </p>
-                              <p className="prompt-detail__hint">
-                                Worktrees: {promptRunnerState.worktreeRoot}
-                              </p>
-                              {promptRunnerState.activePromptId ? (
-                                <p className="prompt-detail__hint">
-                                  Active prompt: #{promptRunnerState.activePromptId.slice(0, 8)}
-                                </p>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          {selectedPromptRecovery ? (
-                            <p className="prompt-detail__recovery">{selectedPromptRecovery}</p>
-                          ) : null}
-
-                          {selectedPromptFailure?.message ? (
-                            <p className="prompt-detail__error">{selectedPromptFailure.message}</p>
-                          ) : null}
-
-                          {selectedPromptTransitions.length ? (
-                            <div className="prompt-detail__timeline">
-                              {selectedPromptTransitions.slice(-5).map((transition) => (
-                                <div className="prompt-detail__step" key={`${transition.status}-${transition.at}`}>
-                                  <div className="prompt-detail__step-row">
-                                    <span className="prompt-detail__label">
-                                      {formatPromptStatus(
-                                        transition.status as PromptStatus
-                                      )}
-                                    </span>
-                                    <span className="prompt-item__time">
-                                      {formatPromptTime(transition.at)}
-                                    </span>
-                                  </div>
-                                  <p className="prompt-detail__reason">{transition.reason}</p>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="prompt-detail__hint">
-                              Lifecycle details will appear here once the runner starts processing.
-                            </p>
-                          )}
-                        </aside>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="prompt-list__empty">
-                      No prompts match the current filter.
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p className="prompt-list__empty">
-                  No prompts queued yet. The next submitted idea will appear here.
-                </p>
-              )}
             </div>
           </div>
-        </div>
+        ) : null}
 
-        <div className="workspace__controls">
+        {activeSurface === "history" ? (
+          <div
+            className="workspace__history"
+            style={{ top: historyInsets.top, bottom: historyInsets.bottom }}
+          >
+            {renderPromptHistoryPanel()}
+          </div>
+        ) : null}
+
+        {activeSurface === "field" ? (
+          <div className="workspace__field-note">
+            <div className="glass-panel">
+              <div className="panel-content">
+                <p className="eyebrow">Constellation field</p>
+                <p className="prompt-panel__subtitle">
+                  Explore the live graph, drag nodes, and inspect how ideas cluster together.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="workspace__controls" ref={controlsRef}>
+          <div className="glass-panel">
+            <div className="panel-content">
+              <p className="eyebrow">Surface</p>
+              <div className="surface-toggle" role="tablist" aria-label="Workspace surface">
+                {workspaceSurfaces.map((surface) => (
+                  <button
+                    key={surface.id}
+                    type="button"
+                    className="surface-toggle__button"
+                    data-active={activeSurface === surface.id}
+                    onClick={() => setActiveSurface(surface.id)}
+                  >
+                    {surface.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="glass-panel">
             <div className="panel-content">
               <div className="toolbar">
@@ -1176,14 +1329,21 @@ export function IdeaCanvas() {
           </div>
         </div>
 
-        <div className="workspace__footer">
+        <div className="workspace__footer" ref={footerRef}>
+          <div className="chip">
+            Surface: {activeSurface === "prompt"
+              ? "Prompt"
+              : activeSurface === "history"
+                ? "Prompt history"
+                : "Constellation field"}
+          </div>
           <div className="chip">Drag empty space to pan</div>
           <div className="chip">Scroll to zoom</div>
           <div className="chip">Drag a node to persist its position</div>
           <div className="chip">{statusLabel}</div>
         </div>
 
-        {selectedIdea ? (
+        {activeSurface === "field" && selectedIdea ? (
           <div className="workspace__detail">
             <div className="glass-panel glass-panel--strong">
               <div className="panel-content detail-card">

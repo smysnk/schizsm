@@ -553,7 +553,8 @@ export class PromptRunner {
         worktreeRoot: env.promptRunnerWorktreeRoot,
         automationBranch: env.promptRunnerAutomationBranch,
         promptId: prompt.id,
-        remoteName: env.promptRunnerRemoteName
+        remoteName: env.promptRunnerRemoteName,
+        documentStoreDir: env.documentStoreDir
       });
 
       const repoRoot = preparedWorktree.worktreePath;
@@ -571,7 +572,13 @@ export class PromptRunner {
         auditSyncScriptPath: path.join(repoRoot, "scripts", "sync-prompt-audit.ts"),
         worktreePath: preparedWorktree.worktreePath,
         promptBranch: preparedWorktree.promptBranch,
-        remoteConfigured: preparedWorktree.remoteConfigured
+        remoteConfigured: preparedWorktree.remoteConfigured,
+        baseRef: preparedWorktree.baseRef,
+        documentStoreDir: preparedWorktree.documentStoreDir,
+        documentStoreSeedMode: preparedWorktree.documentStoreSeedMode,
+        documentStoreSeedPaths: preparedWorktree.documentStoreSeedPaths,
+        controllerSyncedPaths: preparedWorktree.controllerSyncedPaths,
+        controllerRemovedPaths: preparedWorktree.controllerRemovedPaths
       });
 
       preflightCanvasReport = await validateCanvasState({
@@ -728,6 +735,12 @@ export class PromptRunner {
                 path: preparedWorktree.worktreePath,
                 promptBranch: preparedWorktree.promptBranch,
                 automationBranch: preparedWorktree.automationBranch,
+                baseRef: preparedWorktree.baseRef,
+                documentStoreDir: preparedWorktree.documentStoreDir,
+                documentStoreSeedMode: preparedWorktree.documentStoreSeedMode,
+                documentStoreSeedPaths: preparedWorktree.documentStoreSeedPaths,
+                controllerSyncedPaths: preparedWorktree.controllerSyncedPaths,
+                controllerRemovedPaths: preparedWorktree.controllerRemovedPaths,
                 remoteConfigured: preparedWorktree.remoteConfigured,
                 finalized: finalizedWorktree
               }

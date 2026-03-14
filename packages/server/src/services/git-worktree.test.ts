@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -35,7 +35,14 @@ test("preparePromptWorktree and finalizePromptWorktree promote a prompt branch s
     await runGit(repoRoot, ["config", "user.email", "schizm-tests@example.com"]);
 
     await writeFile(path.join(repoRoot, "README.md"), "# Schizm\n", "utf8");
+    await mkdir(path.join(repoRoot, "obsidian-repository"), { recursive: true });
+    await writeFile(
+      path.join(repoRoot, "obsidian-repository", "audit.md"),
+      "# Prompt Audit Log\n",
+      "utf8"
+    );
     await runGit(repoRoot, ["add", "README.md"]);
+    await runGit(repoRoot, ["add", "obsidian-repository/audit.md"]);
     await runGit(repoRoot, ["commit", "-m", "Initial commit"]);
 
     await runGit(rootDirectory, ["init", "--bare", remoteRoot]);
@@ -47,19 +54,21 @@ test("preparePromptWorktree and finalizePromptWorktree promote a prompt branch s
       worktreeRoot,
       automationBranch: "codex/mindmap",
       promptId: "prompt-123",
-      remoteName: "origin"
+      remoteName: "origin",
+      documentStoreDir: "obsidian-repository"
     });
 
     assert.equal(prepared.promptBranch, "codex/run-prompt-123");
     assert.equal(prepared.remoteConfigured, true);
     assert.equal(existsSync(prepared.worktreePath), true);
+    assert.equal(prepared.documentStoreSeedMode, "branch");
 
     await writeFile(
-      path.join(prepared.worktreePath, "notes.md"),
+      path.join(prepared.worktreePath, "obsidian-repository", "notes.md"),
       "Isolated worktree verification.\n",
       "utf8"
     );
-    await runGit(prepared.worktreePath, ["add", "notes.md"]);
+    await runGit(prepared.worktreePath, ["add", "obsidian-repository/notes.md"]);
     await runGit(prepared.worktreePath, ["commit", "-m", "Add worktree note"]);
 
     const finalized = await finalizePromptWorktree(prepared);
@@ -71,9 +80,120 @@ test("preparePromptWorktree and finalizePromptWorktree promote a prompt branch s
     assert.match(finalized.automationCommitSha, /^[0-9a-f]{40}$/);
     assert.equal(existsSync(prepared.worktreePath), false);
     assert.equal(
-      await runGit(repoRoot, ["show", "codex/mindmap:notes.md"]),
+      await runGit(repoRoot, ["show", "codex/mindmap:obsidian-repository/notes.md"]),
       "Isolated worktree verification."
     );
+  } finally {
+    await rm(rootDirectory, { recursive: true, force: true });
+  }
+});
+
+test("preparePromptWorktree migrates legacy automation-branch docs into obsidian-repository", async () => {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "schizm-git-worktree-legacy-"));
+  const repoRoot = path.join(rootDirectory, "repo");
+  const worktreeRoot = path.join(rootDirectory, "worktrees");
+
+  try {
+    await mkdir(repoRoot, { recursive: true });
+    await runGit(repoRoot, ["init", "-b", "main"]);
+    await runGit(repoRoot, ["config", "user.name", "Schizm Tests"]);
+    await runGit(repoRoot, ["config", "user.email", "schizm-tests@example.com"]);
+
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README\n", "utf8");
+    await writeFile(path.join(repoRoot, "program.md"), "# Program\n", "utf8");
+    await writeFile(path.join(repoRoot, "prompt-agent-implementation-plan.md"), "# Plan\n", "utf8");
+    await runGit(repoRoot, ["add", "README.md", "program.md", "prompt-agent-implementation-plan.md"]);
+    await runGit(repoRoot, ["commit", "-m", "Initial controller docs"]);
+
+    await runGit(repoRoot, ["branch", "codex/mindmap"]);
+    await runGit(repoRoot, ["checkout", "codex/mindmap"]);
+    await writeFile(path.join(repoRoot, "README.md"), "# Legacy README\n", "utf8");
+    await writeFile(path.join(repoRoot, "audit.md"), "# Legacy Audit\n", "utf8");
+    await writeFile(
+      path.join(repoRoot, "main.canvas"),
+      JSON.stringify(
+        {
+          nodes: [
+            {
+              id: "readme",
+              type: "file",
+              file: "README.md"
+            }
+          ],
+          edges: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await runGit(repoRoot, ["add", "README.md", "audit.md", "main.canvas"]);
+    await runGit(repoRoot, ["commit", "-m", "Legacy automation branch state"]);
+
+    await runGit(repoRoot, ["checkout", "main"]);
+    await mkdir(path.join(repoRoot, "obsidian-repository"), { recursive: true });
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README v2\n", "utf8");
+    await writeFile(
+      path.join(repoRoot, "obsidian-repository", "audit.md"),
+      "# Prompt Audit Log\n",
+      "utf8"
+    );
+    await writeFile(
+      path.join(repoRoot, "obsidian-repository", "main.canvas"),
+      JSON.stringify(
+        {
+          nodes: [
+            {
+              id: "readme",
+              type: "file",
+              file: "../README.md"
+            }
+          ],
+          edges: []
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+    await runGit(repoRoot, ["add", "README.md", "obsidian-repository/audit.md", "obsidian-repository/main.canvas"]);
+    await runGit(repoRoot, ["commit", "-m", "Move document store under obsidian-repository"]);
+
+    const prepared = await preparePromptWorktree({
+      repoRoot,
+      worktreeRoot,
+      automationBranch: "codex/mindmap",
+      promptId: "legacy-123",
+      remoteName: "origin",
+      documentStoreDir: "obsidian-repository"
+    });
+
+    assert.equal(prepared.baseRef, "main");
+    assert.equal(prepared.documentStoreSeedMode, "legacy");
+    assert.deepEqual(
+      prepared.documentStoreSeedPaths.sort(),
+      ["obsidian-repository/audit.md", "obsidian-repository/main.canvas"]
+    );
+    assert.equal(
+      await readFile(path.join(prepared.worktreePath, "README.md"), "utf8"),
+      "# Main README v2\n"
+    );
+    assert.equal(existsSync(path.join(prepared.worktreePath, "audit.md")), false);
+    assert.equal(existsSync(path.join(prepared.worktreePath, "main.canvas")), false);
+    assert.equal(
+      await readFile(
+        path.join(prepared.worktreePath, "obsidian-repository", "audit.md"),
+        "utf8"
+      ),
+      "# Legacy Audit\n"
+    );
+
+    const migratedCanvas = await readFile(
+      path.join(prepared.worktreePath, "obsidian-repository", "main.canvas"),
+      "utf8"
+    );
+
+    assert.match(migratedCanvas, /"\.\.\/README\.md"/);
   } finally {
     await rm(rootDirectory, { recursive: true, force: true });
   }
