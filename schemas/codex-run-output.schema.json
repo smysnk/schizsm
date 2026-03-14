@@ -12,7 +12,8 @@
     "repoChanges",
     "audit",
     "git",
-    "blockers"
+    "blockers",
+    "notes"
   ],
   "properties": {
     "promptId": {
