@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -194,6 +194,99 @@ test("preparePromptWorktree migrates legacy automation-branch docs into obsidian
     );
 
     assert.match(migratedCanvas, /"\.\.\/README\.md"/);
+  } finally {
+    await rm(rootDirectory, { recursive: true, force: true });
+  }
+});
+
+test("preparePromptWorktree preserves tracked symlinks while syncing controller files", async () => {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "schizm-git-worktree-symlink-"));
+  const repoRoot = path.join(rootDirectory, "repo");
+  const worktreeRoot = path.join(rootDirectory, "worktrees");
+  const symlinkTarget = path.join(rootDirectory, "autoresearch-reference");
+
+  try {
+    await mkdir(repoRoot, { recursive: true });
+    await mkdir(symlinkTarget, { recursive: true });
+    await runGit(repoRoot, ["init", "-b", "main"]);
+    await runGit(repoRoot, ["config", "user.name", "Schizm Tests"]);
+    await runGit(repoRoot, ["config", "user.email", "schizm-tests@example.com"]);
+
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README\n", "utf8");
+    await mkdir(path.join(repoRoot, "references"), { recursive: true });
+    await symlink(symlinkTarget, path.join(repoRoot, "references", "autoresearch"));
+    await runGit(repoRoot, ["add", "README.md", "references/autoresearch"]);
+    await runGit(repoRoot, ["commit", "-m", "Track reference symlink"]);
+
+    await runGit(repoRoot, ["branch", "codex/mindmap"]);
+
+    const prepared = await preparePromptWorktree({
+      repoRoot,
+      worktreeRoot,
+      automationBranch: "codex/mindmap",
+      promptId: "symlink-123",
+      remoteName: "origin",
+      documentStoreDir: "obsidian-repository"
+    });
+
+    const linkedPath = path.join(prepared.worktreePath, "references", "autoresearch");
+    const linkStat = await lstat(linkedPath);
+
+    assert.equal(linkStat.isSymbolicLink(), true);
+    assert.equal(await readlink(linkedPath), symlinkTarget);
+  } finally {
+    await rm(rootDirectory, { recursive: true, force: true });
+  }
+});
+
+test("preparePromptWorktree skips tracked paths matched by .gitignore during controller sync", async () => {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "schizm-git-worktree-ignore-"));
+  const repoRoot = path.join(rootDirectory, "repo");
+  const worktreeRoot = path.join(rootDirectory, "worktrees");
+
+  try {
+    await mkdir(repoRoot, { recursive: true });
+    await runGit(repoRoot, ["init", "-b", "main"]);
+    await runGit(repoRoot, ["config", "user.name", "Schizm Tests"]);
+    await runGit(repoRoot, ["config", "user.email", "schizm-tests@example.com"]);
+
+    await writeFile(path.join(repoRoot, ".gitignore"), "ignored.txt\n", "utf8");
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README\n", "utf8");
+    await writeFile(path.join(repoRoot, "ignored.txt"), "main-initial\n", "utf8");
+    await runGit(repoRoot, ["add", ".gitignore", "README.md"]);
+    await runGit(repoRoot, ["add", "-f", "ignored.txt"]);
+    await runGit(repoRoot, ["commit", "-m", "Initial controller state"]);
+
+    await runGit(repoRoot, ["branch", "codex/mindmap"]);
+    await runGit(repoRoot, ["checkout", "codex/mindmap"]);
+    await writeFile(path.join(repoRoot, "ignored.txt"), "automation-branch\n", "utf8");
+    await runGit(repoRoot, ["add", "-f", "ignored.txt"]);
+    await runGit(repoRoot, ["commit", "-m", "Adjust ignored tracked file on automation branch"]);
+
+    await runGit(repoRoot, ["checkout", "main"]);
+    await writeFile(path.join(repoRoot, "README.md"), "# Main README v2\n", "utf8");
+    await writeFile(path.join(repoRoot, "ignored.txt"), "main-updated\n", "utf8");
+    await runGit(repoRoot, ["add", "README.md"]);
+    await runGit(repoRoot, ["add", "-f", "ignored.txt"]);
+    await runGit(repoRoot, ["commit", "-m", "Update main controller files"]);
+
+    const prepared = await preparePromptWorktree({
+      repoRoot,
+      worktreeRoot,
+      automationBranch: "codex/mindmap",
+      promptId: "ignore-123",
+      remoteName: "origin",
+      documentStoreDir: "obsidian-repository"
+    });
+
+    assert.equal(
+      await readFile(path.join(prepared.worktreePath, "README.md"), "utf8"),
+      "# Main README v2\n"
+    );
+    assert.equal(
+      await readFile(path.join(prepared.worktreePath, "ignored.txt"), "utf8"),
+      "automation-branch\n"
+    );
   } finally {
     await rm(rootDirectory, { recursive: true, force: true });
   }

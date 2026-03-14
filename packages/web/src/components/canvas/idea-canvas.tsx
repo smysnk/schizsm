@@ -99,6 +99,8 @@ type Viewport = {
 type SurfaceInsets = {
   top: number;
   bottom: number;
+  left: number;
+  right: number;
 };
 
 type Interaction =
@@ -354,7 +356,7 @@ export function IdeaCanvas() {
   const containerRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const brandRef = useRef<HTMLDivElement | null>(null);
-  const controlsRef = useRef<HTMLDivElement | null>(null);
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
   const footerRef = useRef<HTMLDivElement | null>(null);
   const graphRef = useRef<GraphSnapshot | null>(null);
   const viewportRef = useRef<Viewport>({ x: 0, y: 0, scale: 1 });
@@ -372,7 +374,9 @@ export function IdeaCanvas() {
   const [activeSurface, setActiveSurface] = useState<WorkspaceSurface>("prompt");
   const [historyInsets, setHistoryInsets] = useState<SurfaceInsets>({
     top: 220,
-    bottom: 92
+    bottom: 92,
+    left: 20,
+    right: 20
   });
 
   const { data, loading, error, refetch } = useQuery<BootstrapResponse>(CANVAS_BOOTSTRAP_QUERY, {
@@ -465,37 +469,53 @@ export function IdeaCanvas() {
   useEffect(() => {
     const container = containerRef.current;
     const brand = brandRef.current;
-    const controls = controlsRef.current;
+    const surface = surfaceRef.current;
     const footer = footerRef.current;
 
-    if (!container || !brand || !controls || !footer) {
+    if (!container || !brand || !surface || !footer) {
       return;
     }
 
     const updateInsets = () => {
       const containerRect = container.getBoundingClientRect();
       const brandRect = brand.getBoundingClientRect();
-      const controlsRect = controls.getBoundingClientRect();
+      const surfaceRect = surface.getBoundingClientRect();
       const footerRect = footer.getBoundingClientRect();
+      const baseGutter = containerRect.width <= 640 ? 16 : 20;
+      const centralLaneLeft = brandRect.right - containerRect.left + 20;
+      const centralLaneRight = containerRect.right - surfaceRect.left + 20;
+      const centralLaneWidth =
+        containerRect.width - centralLaneLeft - centralLaneRight;
 
-      const nextTop =
-        Math.max(brandRect.bottom, controlsRect.bottom) - containerRect.top + 20;
+      const nextTop = brandRect.bottom - containerRect.top + 20;
       const nextBottom = containerRect.bottom - footerRect.top + 16;
 
       setHistoryInsets((current) => {
         const roundedTop = Math.max(160, Math.round(nextTop));
         const roundedBottom = Math.max(72, Math.round(nextBottom));
+        const roundedLeft =
+          centralLaneWidth >= 720
+            ? Math.max(baseGutter, Math.round(centralLaneLeft))
+            : baseGutter;
+        const roundedRight =
+          centralLaneWidth >= 720
+            ? Math.max(baseGutter, Math.round(centralLaneRight))
+            : baseGutter;
 
         if (
           current.top === roundedTop &&
-          current.bottom === roundedBottom
+          current.bottom === roundedBottom &&
+          current.left === roundedLeft &&
+          current.right === roundedRight
         ) {
           return current;
         }
 
         return {
           top: roundedTop,
-          bottom: roundedBottom
+          bottom: roundedBottom,
+          left: roundedLeft,
+          right: roundedRight
         };
       });
     };
@@ -505,7 +525,7 @@ export function IdeaCanvas() {
     const observer = new ResizeObserver(() => updateInsets());
     observer.observe(container);
     observer.observe(brand);
-    observer.observe(controls);
+    observer.observe(surface);
     observer.observe(footer);
     window.addEventListener("resize", updateInsets);
 
@@ -1269,7 +1289,12 @@ export function IdeaCanvas() {
         {activeSurface === "history" ? (
           <div
             className="workspace__history"
-            style={{ top: historyInsets.top, bottom: historyInsets.bottom }}
+            style={{
+              top: historyInsets.top,
+              bottom: historyInsets.bottom,
+              left: historyInsets.left,
+              right: historyInsets.right
+            }}
           >
             {renderPromptHistoryPanel()}
           </div>
@@ -1288,8 +1313,8 @@ export function IdeaCanvas() {
           </div>
         ) : null}
 
-        <div className="workspace__controls" ref={controlsRef}>
-          <div className="glass-panel">
+        <div className="workspace__controls">
+          <div className="glass-panel" ref={surfaceRef}>
             <div className="panel-content">
               <p className="eyebrow">Surface</p>
               <div className="surface-toggle" role="tablist" aria-label="Workspace surface">

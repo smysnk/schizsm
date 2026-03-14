@@ -9,6 +9,12 @@ type GitOutput = {
   stderr: string;
 };
 
+type RefEntry = {
+  path: string;
+  mode: string;
+  type: string;
+};
+
 export type PreparedPromptWorktree = {
   repoRoot: string;
   worktreeRoot: string;
@@ -95,6 +101,24 @@ const remoteExists = async (repoRoot: string, remoteName: string) =>
 const sanitizePromptBranchName = (promptId: string) =>
   `codex/run-${promptId.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`;
 
+const isGitIgnored = async (repoRoot: string, relativePath: string, cwd = repoRoot) => {
+  try {
+    await execFileAsync("git", ["check-ignore", "-q", "--no-index", "--", relativePath], {
+      cwd,
+      env: process.env
+    });
+    return true;
+  } catch (error) {
+    const exitCode = (error as NodeJS.ErrnoException & { code?: number | string }).code;
+
+    if (exitCode === 1 || exitCode === "1") {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
 const isWithinDirectory = (relativePath: string, directory: string) =>
   relativePath === directory || relativePath.startsWith(`${directory}/`);
 
@@ -119,22 +143,55 @@ const shouldTreatAsLegacyKnowledge = (
   );
 };
 
-const listRefFiles = async (repoRoot: string, ref: string) => {
-  const output = await runGitText(repoRoot, ["ls-tree", "-r", "--name-only", ref]);
+const parseLsTreeLine = (line: string): RefEntry | null => {
+  const match = line.match(/^(\d+)\s+(\w+)\s+[0-9a-f]+\t(.+)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    mode: match[1],
+    type: match[2],
+    path: match[3]
+  };
+};
+
+const listRefEntries = async (repoRoot: string, ref: string) => {
+  const output = await runGitText(repoRoot, ["ls-tree", "-r", ref]);
 
   return output
     .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean);
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      const parsed = parseLsTreeLine(line);
+      return parsed ? [parsed] : [];
+    });
+};
+
+const listRefFiles = async (repoRoot: string, ref: string) => {
+  const entries = await listRefEntries(repoRoot, ref);
+  return entries.map((entry) => entry.path);
 };
 
 const listWorktreeFiles = async (worktreePath: string) => {
   const output = await runGitText(worktreePath, ["ls-files"], worktreePath);
 
-  return output
+  const trackedPaths = output
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+
+  const visiblePaths: string[] = [];
+
+  for (const relativePath of trackedPaths) {
+    if (!(await isGitIgnored(worktreePath, relativePath, worktreePath))) {
+      visiblePaths.push(relativePath);
+    }
+  }
+
+  return visiblePaths;
 };
 
 const readRefText = async (repoRoot: string, ref: string, relativePath: string) =>
@@ -150,8 +207,53 @@ const writeTextFile = async (
   await fs.writeFile(targetPath, contents, "utf8");
 };
 
+const removePathIfPresent = async (targetPath: string) => {
+  try {
+    const stat = await fs.lstat(targetPath);
+
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      return;
+    }
+
+    await fs.rm(targetPath, { force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+};
+
 const removeFileIfPresent = async (worktreePath: string, relativePath: string) => {
-  await fs.rm(path.join(worktreePath, relativePath), { force: true });
+  await removePathIfPresent(path.join(worktreePath, relativePath));
+};
+
+const syncTrackedEntry = async ({
+  repoRoot,
+  ref,
+  entry,
+  worktreePath
+}: {
+  repoRoot: string;
+  ref: string;
+  entry: RefEntry;
+  worktreePath: string;
+}) => {
+  const targetPath = path.join(worktreePath, entry.path);
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await removePathIfPresent(targetPath);
+
+  if (entry.mode === "120000") {
+    await fs.symlink(await readRefText(repoRoot, ref, entry.path), targetPath);
+    return;
+  }
+
+  if (entry.type !== "blob") {
+    return;
+  }
+
+  await fs.writeFile(targetPath, await readRefText(repoRoot, ref, entry.path), "utf8");
+  await fs.chmod(targetPath, entry.mode === "100755" ? 0o755 : 0o644);
 };
 
 const rewriteLegacyCanvasForDocumentStore = (rawCanvas: string) => {
@@ -243,19 +345,27 @@ const seedDocumentStoreFromBaseRef = async ({
   baseRef: string;
   documentStoreDir: string;
 }) => {
-  const basePaths = (await listRefFiles(repoRoot, baseRef)).filter((relativePath) =>
-    isWithinDirectory(relativePath, documentStoreDir)
+  const baseEntries = (await listRefEntries(repoRoot, baseRef)).filter((entry) =>
+    isWithinDirectory(entry.path, documentStoreDir)
   );
+  const visibleBaseEntries: RefEntry[] = [];
 
-  for (const relativePath of basePaths) {
-    await writeTextFile(
-      worktreePath,
-      relativePath,
-      await readRefText(repoRoot, baseRef, relativePath)
-    );
+  for (const entry of baseEntries) {
+    if (!(await isGitIgnored(repoRoot, entry.path))) {
+      visibleBaseEntries.push(entry);
+    }
   }
 
-  return basePaths;
+  for (const entry of visibleBaseEntries) {
+    await syncTrackedEntry({
+      repoRoot,
+      ref: baseRef,
+      entry,
+      worktreePath
+    });
+  }
+
+  return visibleBaseEntries.map((entry) => entry.path);
 };
 
 const syncControllerPathsFromBaseRef = async ({
@@ -271,11 +381,28 @@ const syncControllerPathsFromBaseRef = async ({
   promptBranch: string;
   documentStoreDir: string;
 }) => {
-  const [basePaths, promptPaths] = await Promise.all([
-    listRefFiles(repoRoot, baseRef),
-    listRefFiles(repoRoot, promptBranch)
+  const [baseEntries, promptEntries] = await Promise.all([
+    listRefEntries(repoRoot, baseRef),
+    listRefEntries(repoRoot, promptBranch)
   ]);
+  const visibleBaseEntries: RefEntry[] = [];
+  const visiblePromptEntries: RefEntry[] = [];
 
+  for (const entry of baseEntries) {
+    if (!(await isGitIgnored(repoRoot, entry.path))) {
+      visibleBaseEntries.push(entry);
+    }
+  }
+
+  for (const entry of promptEntries) {
+    if (!(await isGitIgnored(repoRoot, entry.path))) {
+      visiblePromptEntries.push(entry);
+    }
+  }
+
+  const baseEntryMap = new Map(visibleBaseEntries.map((entry) => [entry.path, entry]));
+  const basePaths = visibleBaseEntries.map((entry) => entry.path);
+  const promptPaths = visiblePromptEntries.map((entry) => entry.path);
   const basePathSet = new Set(basePaths);
   const allPaths = [...new Set([...basePaths, ...promptPaths])]
     .filter((relativePath) => !isWithinDirectory(relativePath, documentStoreDir))
@@ -285,11 +412,18 @@ const syncControllerPathsFromBaseRef = async ({
 
   for (const relativePath of allPaths) {
     if (basePathSet.has(relativePath)) {
-      await writeTextFile(
-        worktreePath,
-        relativePath,
-        await readRefText(repoRoot, baseRef, relativePath)
-      );
+      const entry = baseEntryMap.get(relativePath);
+
+      if (!entry) {
+        continue;
+      }
+
+      await syncTrackedEntry({
+        repoRoot,
+        ref: baseRef,
+        entry,
+        worktreePath
+      });
       syncedPaths.push(relativePath);
       continue;
     }

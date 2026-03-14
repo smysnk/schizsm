@@ -39,6 +39,8 @@ Files you should treat as read-only unless the human explicitly asks otherwise:
 
 The coding agent is only allowed to add, modify, move, rename, or delete files within `obsidian-repository/`.
 
+Also treat any file or directory matched by `.gitignore` as out of scope for scanning or modification unless the human explicitly asks otherwise, even if it exists on disk.
+
 ## Canonical Artifacts
 
 The core artifacts for each prompt-processing run are:
@@ -57,7 +59,7 @@ The app or runner invokes you for one prompt at a time.
 Your responsibilities during a run are:
 
 1. Read the submitted prompt carefully.
-2. Scan the existing markdown corpus and canvas files inside `obsidian-repository/` for relevant related content.
+2. Scan the existing markdown corpus and canvas files inside `obsidian-repository/` for relevant related content, while ignoring anything matched by `.gitignore`.
 3. Decide how the new idea should be integrated.
 4. Update markdown files and canvas files inside `obsidian-repository/` accordingly.
 5. Append one strict audit section to `obsidian-repository/audit.md`.
