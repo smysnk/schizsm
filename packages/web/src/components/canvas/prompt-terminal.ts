@@ -24,11 +24,6 @@ const readString = (value: unknown) =>
 
 const readRecord = (value: unknown) => (isRecord(value) ? value : null);
 
-const readStringArray = (value: unknown) =>
-  Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
-    : [];
-
 export const terminalWorkingStatuses = new Set<PromptStatus>([
   "scanning",
   "deciding",
@@ -95,17 +90,6 @@ export const getPromptGitSummary = (prompt: PromptRecord) => {
   const sha = readString(audit?.sha) || readString(auditSync?.sha);
 
   return { branch, sha };
-};
-
-export const getPromptAuditFileCounts = (prompt: PromptRecord) => {
-  const audit = readRecord(prompt.audit);
-  return {
-    added: readStringArray(audit?.added).length,
-    modified: readStringArray(audit?.modified).length,
-    deleted: readStringArray(audit?.deleted).length,
-    canvas: readStringArray(audit?.canvas).length,
-    moved: Array.isArray(audit?.moved) ? audit.moved.length : 0
-  };
 };
 
 export const buildPromptTerminalEntries = (prompt: PromptRecord | null): PromptTerminalEntry[] => {
