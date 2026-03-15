@@ -63,12 +63,17 @@ is_private_ipv4() {
 }
 
 assert_cluster_reachable() {
-  local server host
+  local server host version_output status
 
   server="$(current_cluster_server)"
   host="$(server_host "$server")"
 
-  if kubectl version --request-timeout=10s >/dev/null 2>&1; then
+  set +e
+  version_output="$(kubectl version --request-timeout=10s 2>&1)"
+  status=$?
+  set -e
+
+  if [[ $status -eq 0 ]]; then
     return 0
   fi
 
@@ -79,6 +84,10 @@ assert_cluster_reachable() {
     echo "Use a self-hosted runner on the cluster network, or regenerate/override the kubeconfig with a public API server URL." >&2
   else
     echo "Check that the API endpoint is reachable from the runner and that the kubeconfig credentials are still valid." >&2
+  fi
+
+  if [[ -n "$version_output" ]]; then
+    echo "$version_output" >&2
   fi
 
   exit 1

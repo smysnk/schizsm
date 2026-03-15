@@ -17,6 +17,7 @@ Options:
   --service-account-namespace <name>
                                  Namespace for the service account (default: Fleet namespace)
   --server <url>                 Override the Kubernetes API server URL embedded in the kubeconfig
+  --use-system-ca               Do not embed a cluster CA in the kubeconfig; rely on system trust roots
   --output <path>                Write kubeconfig to this path (default: /tmp/<service-account>.kubeconfig)
   --github-secret                Update the repository FLEET_KUBECONFIG secret with the generated kubeconfig
   --github-secret-name <name>    GitHub secret name to update (default: FLEET_KUBECONFIG)
@@ -160,7 +161,7 @@ write_kubeconfig() {
   local output_path="${1:?output path required}"
   local cluster_name="${2:?cluster name required}"
   local server="${3:?server required}"
-  local ca_data="${4:?ca data required}"
+  local ca_data="${4:-}"
   local service_account_name="${5:?service account name required}"
   local token="${6:?token required}"
   local context_name="${service_account_name}@${cluster_name}"
@@ -174,7 +175,6 @@ clusters:
   - name: ${cluster_name}
     cluster:
       server: ${server}
-      certificate-authority-data: ${ca_data}
 users:
   - name: ${service_account_name}
     user:
@@ -186,6 +186,10 @@ contexts:
       user: ${service_account_name}
 current-context: ${context_name}
 EOF
+
+  if [[ -n "$ca_data" ]]; then
+    python3 -c 'import pathlib, sys; path = pathlib.Path(sys.argv[1]); ca_data = sys.argv[2]; contents = path.read_text(encoding="utf-8"); updated = contents.replace("      server: " + sys.argv[3] + "\n", "      server: " + sys.argv[3] + "\n      certificate-authority-data: " + ca_data + "\n", 1); path.write_text(updated, encoding="utf-8")' "$output_path" "$ca_data" "$server"
+  fi
 
   chmod 600 "$output_path"
 }
@@ -224,6 +228,7 @@ SERVICE_ACCOUNT_NAME="$(fleet_release_name)-fleet-deployer"
 SERVICE_ACCOUNT_NAMESPACE="$FLEET_NAMESPACE"
 OUTPUT_PATH=""
 SERVER_OVERRIDE=""
+USE_SYSTEM_CA="0"
 UPDATE_SECRET="0"
 GITHUB_SECRET_NAME="FLEET_KUBECONFIG"
 
@@ -248,6 +253,10 @@ while [[ $# -gt 0 ]]; do
     --server)
       SERVER_OVERRIDE="${2:-}"
       shift 2
+      ;;
+    --use-system-ca)
+      USE_SYSTEM_CA="1"
+      shift
       ;;
     --output)
       OUTPUT_PATH="${2:-}"
@@ -285,7 +294,10 @@ apply_rbac "$FLEET_NAMESPACE" "$APP_NAMESPACE" "$SERVICE_ACCOUNT_NAMESPACE" "$SE
 echo "Generating kubeconfig from the current cluster context"
 CLUSTER_NAME="$(current_cluster_name)"
 SERVER="${SERVER_OVERRIDE:-$(current_cluster_server)}"
-CA_DATA="$(current_cluster_ca_data)"
+CA_DATA=""
+if [[ "$USE_SYSTEM_CA" != "1" ]]; then
+  CA_DATA="$(current_cluster_ca_data)"
+fi
 TOKEN="$(create_service_account_token "$SERVICE_ACCOUNT_NAMESPACE" "$SERVICE_ACCOUNT_NAME")"
 
 write_kubeconfig "$OUTPUT_PATH" "$CLUSTER_NAME" "$SERVER" "$CA_DATA" "$SERVICE_ACCOUNT_NAME" "$TOKEN"
