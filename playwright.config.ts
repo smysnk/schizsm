@@ -1,6 +1,8 @@
+import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 const port = 3101;
+const rootDir = path.resolve(__dirname);
 
 export default defineConfig({
   testDir: "./e2e",
@@ -12,14 +14,14 @@ export default defineConfig({
   },
   webServer: {
     command: "yarn workspace web dev",
-    cwd: "/Users/josh/play/schizm",
+    cwd: rootDir,
     env: {
       ...process.env,
       WEB_PORT: String(port),
       NEXT_TELEMETRY_DISABLED: "1"
     },
     url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: !process.env.CI
+    reuseExistingServer: false
   },
   projects: [
     {
