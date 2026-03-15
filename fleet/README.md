@@ -59,6 +59,22 @@ yarn fleet:kubeconfig --output /tmp/schizm-fleet.kubeconfig
 gh secret set FLEET_KUBECONFIG < /tmp/schizm-fleet.kubeconfig
 ```
 
+If the current kube context uses a private LAN address like `192.168.x.x`, GitHub-hosted
+runners will not be able to reach it. In that case you have two supported options:
+
+1. Run the `fleet-deploy` job on a self-hosted runner that sits on the cluster network.
+   Set the repo variable `FLEET_DEPLOY_RUNNER_JSON` to a valid `runs-on` value,
+   for example `["self-hosted","linux","rancher"]`.
+2. Override the API server URL used in CI with a public endpoint.
+   This repo defaults CI deploys to `https://kube.smysnk.com`. To use a different
+   endpoint, set the repo variable `FLEET_KUBE_API_SERVER`, or regenerate the
+   kubeconfig with:
+
+```bash
+yarn fleet:kubeconfig --server https://your-public-api-server.example.com --output /tmp/schizm-fleet.kubeconfig
+gh secret set FLEET_KUBECONFIG < /tmp/schizm-fleet.kubeconfig
+```
+
 The generated service account can:
 
 - create and update `GitRepo` resources in `fleet-local`

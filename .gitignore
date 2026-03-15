@@ -27,3 +27,4 @@ test-results
 docs/demo/.font-cache
 docs/demo/__pycache__
 docs/demo/raw/*.png
+.obsidian

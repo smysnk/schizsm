@@ -27,7 +27,7 @@ jobs:
   fleet-deploy:
     needs: docker-image
     if: ${{ github.event_name == 'push' || inputs.deploy_fleet }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(vars.FLEET_DEPLOY_RUNNER_JSON != '' && vars.FLEET_DEPLOY_RUNNER_JSON || '\"ubuntu-latest\"') }}
 
     steps:
       - name: Check out repository
@@ -40,10 +40,14 @@ jobs:
         shell: bash
         env:
           FLEET_KUBECONFIG: ${{ secrets.FLEET_KUBECONFIG }}
+          FLEET_KUBE_API_SERVER: ${{ vars.FLEET_KUBE_API_SERVER || 'https://kube.smysnk.com' }}
         run: |
           test -n "$FLEET_KUBECONFIG" || { echo "Missing FLEET_KUBECONFIG secret"; exit 1; }
           kubeconfig_path="${RUNNER_TEMP}/fleet-kubeconfig"
           printf '%s' "$FLEET_KUBECONFIG" > "$kubeconfig_path"
+          if [ -n "${FLEET_KUBE_API_SERVER:-}" ]; then
+            python3 -c 'import pathlib, re, sys; kubeconfig_path = pathlib.Path(sys.argv[1]); server = sys.argv[2]; contents = kubeconfig_path.read_text(encoding="utf-8"); updated = re.sub(r"^(\s*server:\s*).*$", rf"\1{server}", contents, count=1, flags=re.MULTILINE); (_ for _ in ()).throw(SystemExit("Failed to locate server entry in generated kubeconfig")) if updated == contents else kubeconfig_path.write_text(updated, encoding="utf-8")' "$kubeconfig_path" "$FLEET_KUBE_API_SERVER"
+          fi
           chmod 600 "$kubeconfig_path"
           echo "KUBECONFIG_PATH=$kubeconfig_path" >> "$GITHUB_ENV"
 

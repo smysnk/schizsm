@@ -24,6 +24,66 @@ Options:
 USAGE
 }
 
+current_cluster_server() {
+  kubectl config view --raw --minify -o jsonpath='{.clusters[0].cluster.server}'
+}
+
+server_host() {
+  local server="${1:-}"
+  server="${server#http://}"
+  server="${server#https://}"
+  server="${server%%/*}"
+  server="${server%%:*}"
+  printf '%s\n' "$server"
+}
+
+is_private_ipv4() {
+  local host="${1:-}"
+  local a b c d
+
+  if [[ ! "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    return 1
+  fi
+
+  IFS='.' read -r a b c d <<< "$host"
+
+  if [[ "$a" -eq 10 ]]; then
+    return 0
+  fi
+
+  if [[ "$a" -eq 192 && "$b" -eq 168 ]]; then
+    return 0
+  fi
+
+  if [[ "$a" -eq 172 && "$b" -ge 16 && "$b" -le 31 ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+assert_cluster_reachable() {
+  local server host
+
+  server="$(current_cluster_server)"
+  host="$(server_host "$server")"
+
+  if kubectl version --request-timeout=10s >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Error: unable to reach the Kubernetes API at ${server}" >&2
+
+  if is_private_ipv4 "$host"; then
+    echo "The kubeconfig points at private cluster address ${host}, which GitHub-hosted runners cannot reach." >&2
+    echo "Use a self-hosted runner on the cluster network, or regenerate/override the kubeconfig with a public API server URL." >&2
+  else
+    echo "Check that the API endpoint is reachable from the runner and that the kubeconfig credentials are still valid." >&2
+  fi
+
+  exit 1
+}
+
 wait_for_deployment() {
   local namespace="${1:?namespace required}"
   local deployment="${2:?deployment required}"
@@ -121,9 +181,11 @@ if [[ ! -f "$GITREPO_FILE" ]]; then
   exit 1
 fi
 
+assert_cluster_reachable
+
 echo "Applying Fleet GitRepo from: $GITREPO_FILE"
 set +e
-APPLY_OUTPUT="$(kubectl apply -f "$GITREPO_FILE" 2>&1)"
+APPLY_OUTPUT="$(kubectl apply --validate=false -f "$GITREPO_FILE" 2>&1)"
 APPLY_STATUS=$?
 set -e
 
@@ -132,7 +194,7 @@ if [[ $APPLY_STATUS -ne 0 ]]; then
   if echo "$APPLY_OUTPUT" | grep -q 'unknown field "spec.helm"'; then
     echo "Detected legacy GitRepo schema mismatch (spec.helm). Recreating GitRepo/${NAME}."
     kubectl -n "$FLEET_NAMESPACE" delete gitrepo "$NAME" --ignore-not-found=true
-    kubectl create -f "$GITREPO_FILE"
+    kubectl create --validate=false -f "$GITREPO_FILE"
   else
     exit $APPLY_STATUS
   fi

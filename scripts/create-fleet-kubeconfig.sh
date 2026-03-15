@@ -16,6 +16,7 @@ Options:
   --service-account <name>       Service account name to create (default: <releaseName>-fleet-deployer)
   --service-account-namespace <name>
                                  Namespace for the service account (default: Fleet namespace)
+  --server <url>                 Override the Kubernetes API server URL embedded in the kubeconfig
   --output <path>                Write kubeconfig to this path (default: /tmp/<service-account>.kubeconfig)
   --github-secret                Update the repository FLEET_KUBECONFIG secret with the generated kubeconfig
   --github-secret-name <name>    GitHub secret name to update (default: FLEET_KUBECONFIG)
@@ -222,6 +223,7 @@ APP_NAMESPACE="$(fleet_default_namespace)"
 SERVICE_ACCOUNT_NAME="$(fleet_release_name)-fleet-deployer"
 SERVICE_ACCOUNT_NAMESPACE="$FLEET_NAMESPACE"
 OUTPUT_PATH=""
+SERVER_OVERRIDE=""
 UPDATE_SECRET="0"
 GITHUB_SECRET_NAME="FLEET_KUBECONFIG"
 
@@ -241,6 +243,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --service-account-namespace)
       SERVICE_ACCOUNT_NAMESPACE="${2:-}"
+      shift 2
+      ;;
+    --server)
+      SERVER_OVERRIDE="${2:-}"
       shift 2
       ;;
     --output)
@@ -278,7 +284,7 @@ apply_rbac "$FLEET_NAMESPACE" "$APP_NAMESPACE" "$SERVICE_ACCOUNT_NAMESPACE" "$SE
 
 echo "Generating kubeconfig from the current cluster context"
 CLUSTER_NAME="$(current_cluster_name)"
-SERVER="$(current_cluster_server)"
+SERVER="${SERVER_OVERRIDE:-$(current_cluster_server)}"
 CA_DATA="$(current_cluster_ca_data)"
 TOKEN="$(create_service_account_token "$SERVICE_ACCOUNT_NAMESPACE" "$SERVICE_ACCOUNT_NAME")"
 
