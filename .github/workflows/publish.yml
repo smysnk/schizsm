@@ -27,7 +27,7 @@ jobs:
   fleet-deploy:
     needs: docker-image
     if: ${{ github.event_name == 'push' || inputs.deploy_fleet }}
-    runs-on: ${{ fromJSON(vars.FLEET_DEPLOY_RUNNER_JSON != '' && vars.FLEET_DEPLOY_RUNNER_JSON || '\"ubuntu-latest\"') }}
+    runs-on: ${{ fromJSON(vars.FLEET_DEPLOY_RUNNER_JSON != '' && vars.FLEET_DEPLOY_RUNNER_JSON || '"ubuntu-latest"') }}
 
     steps:
       - name: Check out repository

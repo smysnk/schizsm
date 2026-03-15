@@ -153,7 +153,7 @@ jobs:
   fleet-deploy:
     needs: docker-image
     if: ${{ needs.docker-image.result == 'success' }}
-    runs-on: ${{ fromJSON(vars.FLEET_DEPLOY_RUNNER_JSON != '' && vars.FLEET_DEPLOY_RUNNER_JSON || '\"ubuntu-latest\"') }}
+    runs-on: ${{ fromJSON(vars.FLEET_DEPLOY_RUNNER_JSON != '' && vars.FLEET_DEPLOY_RUNNER_JSON || '"ubuntu-latest"') }}
 
     steps:
       - name: Check out repository
