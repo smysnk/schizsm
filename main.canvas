@@ -71,6 +71,15 @@
       "y": 1460,
       "width": 360,
       "height": 220
+    },
+    {
+      "id": "it-hurts-when-ip-fragment",
+      "type": "file",
+      "file": "fragments/it-hurts-when-ip.md",
+      "x": 760,
+      "y": 1760,
+      "width": 360,
+      "height": 220
     }
   ],
   "edges": [
@@ -108,6 +117,11 @@
       "id": "edge-index-clock-time-fragment",
       "fromNode": "index",
       "toNode": "clock-time-fragment"
+    },
+    {
+      "id": "edge-index-it-hurts-when-ip-fragment",
+      "fromNode": "index",
+      "toNode": "it-hurts-when-ip-fragment"
     },
     {
       "id": "edge-inbox-clarifier",

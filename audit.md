@@ -380,3 +380,84 @@
 }
 ```
 <!-- PROMPT-AUDIT-END:59eb8888-7dba-42a4-bbcc-0c6d0f4c8410 -->
+<!-- PROMPT-AUDIT-START:7abe962c-704a-46a4-8692-b510bb319d37 -->
+## Prompt Round
+
+- Date: 2026-03-16T05:58:33Z
+- Prompt ID: 7abe962c-704a-46a4-8692-b510bb319d37
+- Input Prompt: It hurts when IP
+
+### Files Added
+- `fragments/it-hurts-when-ip.md`: Captured the submitted text as a standalone fragment because no existing note clearly matched it.
+
+### Files Modified
+- `index.md`: Added the new fragment to the repository overview so it remains discoverable from the main entry note.
+- `main.canvas`: Added a file node and connection for the new fragment so the canonical map stays aligned with the markdown corpus.
+- `audit.md`: Appended this run's required audit section.
+
+### Files Deleted
+- None.
+
+### Files Moved or Renamed
+- None.
+
+### Canvas Updates
+- `main.canvas`: Added a node for `fragments/it-hurts-when-ip.md` and linked it from the index node.
+
+### Hypotheses
+- Created: None.
+- Updated: None.
+- Strengthened: None.
+- Weakened: None.
+- Disproved: None.
+- Resolved: None.
+
+### Git
+- Branch: codex/mindmap
+- Commit: pending-at-audit-write-time
+
+### Rationale
+- `fragments/it-hurts-when-ip.md`: Preserved the exact wording of the prompt without expanding or interpreting it.
+- `index.md`: Kept the new fragment reachable from the repository root note.
+- `main.canvas`: Reflected the added fragment in the canonical concept map.
+- `audit.md`: Recorded the run in the append-only audit log required by the contract.
+
+```json
+{
+  "promptId": "7abe962c-704a-46a4-8692-b510bb319d37",
+  "recordedAt": "2026-03-16T05:58:33Z",
+  "branch": "codex/mindmap",
+  "sha": null,
+  "decision": {
+    "mode": "create"
+  },
+  "added": [
+    "fragments/it-hurts-when-ip.md"
+  ],
+  "modified": [
+    "index.md",
+    "main.canvas",
+    "audit.md"
+  ],
+  "deleted": [],
+  "moved": [],
+  "canvas": [
+    "main.canvas"
+  ],
+  "hypotheses": {
+    "created": [],
+    "updated": [],
+    "strengthened": [],
+    "weakened": [],
+    "disproved": [],
+    "resolved": []
+  },
+  "rationales": {
+    "fragments/it-hurts-when-ip.md": "Stored the exact submitted text as a standalone fragment without adding interpretation.",
+    "index.md": "Updated the root note so the new fragment is discoverable from the repository overview.",
+    "main.canvas": "Extended the canonical canvas with the new fragment node so the graph stays synchronized with the markdown corpus.",
+    "audit.md": "Recorded the maintenance round in the append-only audit log."
+  }
+}
+```
+<!-- PROMPT-AUDIT-END:7abe962c-704a-46a4-8692-b510bb319d37 -->

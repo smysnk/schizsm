@@ -9,6 +9,7 @@
 
 ## Fragments
 
+- [[fragments/it-hurts-when-ip]]
 - [[fragments/roses-are-red-violets-are-blue]]
 - [[fragments/repeated-clock-time]]
 
@@ -25,3 +26,5 @@ It also includes a short poetic fragment captured as written.
 It now also includes a short fragment about repeatedly noticing the same clock time.
 
 It also includes a note capturing the frequency illusion as a concept that stood out enough to save.
+
+It now also includes a short fragment captured exactly as submitted about hurting when IP.
