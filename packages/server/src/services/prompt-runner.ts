@@ -144,6 +144,40 @@ export const resolvePromptExecutionRoots = ({
   };
 };
 
+const normalizePromptSummarySource = (content: string) =>
+  content
+    .replace(/\r\n?/gu, "\n")
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/u, "").trim())
+    .filter(Boolean)
+    .join(" ");
+
+export const buildPromptCommitSubject = (content: string, maxLength = 72) => {
+  const normalized = normalizePromptSummarySource(content);
+
+  if (!normalized) {
+    return "Capture prompt";
+  }
+
+  const sentenceMatch = normalized.match(/^(.+?[.!?])(?:\s|$)/u);
+  const sentence = sentenceMatch?.[1]?.trim();
+
+  if (sentence && sentence.length <= maxLength) {
+    return sentence;
+  }
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  const cutoff = Math.max(12, maxLength - 1);
+  const truncated = normalized.slice(0, cutoff);
+  const lastSpace = truncated.lastIndexOf(" ");
+  const summary = (lastSpace >= 24 ? truncated.slice(0, lastSpace) : truncated).trim();
+
+  return `${summary}\u2026`;
+};
+
 const PROMPT_RUNNER_LEASE_KEY = 41_042_006;
 
 export type PromptRunnerStateSnapshot = {
@@ -223,6 +257,7 @@ const buildInstruction = ({
   automationBranch,
   promptBranch,
   remoteName,
+  expectedCommitSubject,
   documentStoreIsRepoRoot,
   documentStoreHasDedicatedGitRepo
 }: {
@@ -236,6 +271,7 @@ const buildInstruction = ({
   automationBranch: string;
   promptBranch: string;
   remoteName: string;
+  expectedCommitSubject: string;
   documentStoreIsRepoRoot?: boolean;
   documentStoreHasDedicatedGitRepo?: boolean;
 }) => `You are processing a queued repository-maintenance prompt for this project.
@@ -278,6 +314,7 @@ Run requirements:
 - Append exactly one audit section to ${auditPath} using the required markers for prompt ${prompt.id} if the run reaches a coherent stopping point.
 - Commit and push the resulting repository changes if the run succeeds.
 - Create exactly one final commit for the entire prompt run. Do not create intermediate commits for markdown changes, canvas updates, audit updates, or any other partial step.
+- Use this exact final commit subject: ${JSON.stringify(expectedCommitSubject)}
 - Return only a single JSON object that matches ${schemaPath}.
 - The returned JSON must use promptId "${prompt.id}".
 `;
@@ -367,6 +404,7 @@ const verifySinglePromptCommit = async ({
   repoRoot,
   expectedBaseSha,
   expectedCommitSha,
+  expectedCommitSubject,
   headRef = "HEAD",
   statusPathspecs = [],
   gitOperations
@@ -374,11 +412,17 @@ const verifySinglePromptCommit = async ({
   repoRoot: string;
   expectedBaseSha: string;
   expectedCommitSha?: string | null;
+  expectedCommitSubject?: string | null;
   headRef?: string;
   statusPathspecs?: string[];
   gitOperations?: JsonObject[];
 }) => {
   const headSha = await runGit(repoRoot, ["rev-parse", headRef], gitOperations);
+  const commitSubject = await runGit(
+    repoRoot,
+    ["log", "-1", "--pretty=%s", headRef],
+    gitOperations
+  );
   const workingTreeStatus = await runGit(
     repoRoot,
     ["status", "--porcelain", ...(statusPathspecs.length ? ["--", ...statusPathspecs] : [])],
@@ -396,6 +440,12 @@ const verifySinglePromptCommit = async ({
   if (normalizedExpectedCommitSha && headSha !== normalizedExpectedCommitSha) {
     throw new Error(
       `Prompt commit verification failed. Expected ${expectedCommitSha}, received ${headSha}.`
+    );
+  }
+
+  if (expectedCommitSubject && commitSubject !== expectedCommitSubject) {
+    throw new Error(
+      `Prompt commit verification failed. Expected subject ${JSON.stringify(expectedCommitSubject)}, received ${JSON.stringify(commitSubject)}.`
     );
   }
 
@@ -421,7 +471,8 @@ const verifySinglePromptCommit = async ({
   return {
     baseSha: normalizedExpectedBaseSha,
     headSha,
-    commitCount
+    commitCount,
+    commitSubject
   };
 };
 
@@ -905,6 +956,7 @@ export class PromptRunner {
       let auditSyncRepoRoot = "";
       let worktreeBaseCommitSha = "";
       let documentStoreBaseCommitSha = "";
+      const expectedCommitSubject = buildPromptCommitSubject(prompt.content);
 
       if (env.promptRunnerExecutionMode === "container") {
         containerDocumentRepo = await ensureContainerDocumentRepo({
@@ -1041,6 +1093,7 @@ export class PromptRunner {
 
       runnerMetadata.executionRepoRoot = codexRepoRoot;
       runnerMetadata.auditSyncRepoRoot = auditSyncRepoRoot;
+      runnerMetadata.expectedCommitSubject = expectedCommitSubject;
 
       preflightCanvasReport = await validateCanvasState({
         repoRoot,
@@ -1078,6 +1131,7 @@ export class PromptRunner {
         automationBranch,
         promptBranch,
         remoteName,
+        expectedCommitSubject,
         documentStoreIsRepoRoot,
         documentStoreHasDedicatedGitRepo
       });
@@ -1147,7 +1201,8 @@ export class PromptRunner {
             remoteName: containerDocumentRepo.remoteName,
             branch: containerDocumentRepo.branch,
             expectedCommitSha: finalOutput.git.commitSha,
-            expectedBaseSha: documentStoreBaseCommitSha
+            expectedBaseSha: documentStoreBaseCommitSha,
+            expectedCommitSubject
           })
         ) as JsonObject;
       }
@@ -1164,7 +1219,8 @@ export class PromptRunner {
             remoteName: "origin",
             branch: preparedWorktree.documentStoreCloneBranch,
             expectedCommitSha: finalOutput.git.commitSha,
-            expectedBaseSha: documentStoreBaseCommitSha
+            expectedBaseSha: documentStoreBaseCommitSha,
+            expectedCommitSubject
           })
         ) as JsonObject;
       } else if (
@@ -1178,6 +1234,7 @@ export class PromptRunner {
             repoRoot,
             expectedBaseSha: worktreeBaseCommitSha,
             expectedCommitSha: finalOutput.git.commitSha,
+            expectedCommitSubject,
             headRef: preparedWorktree.promptBranch,
             statusPathspecs: [preparedWorktree.documentStoreDir],
             gitOperations

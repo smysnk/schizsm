@@ -34,6 +34,7 @@ export type ContainerRepoVerificationResult = {
   headSha: string;
   remoteSha: string;
   commitCount: number;
+  commitSubject: string;
 };
 
 export const verifyContainerDocumentRepoPush = async ({
@@ -41,15 +42,18 @@ export const verifyContainerDocumentRepoPush = async ({
   remoteName,
   branch,
   expectedCommitSha,
-  expectedBaseSha
+  expectedBaseSha,
+  expectedCommitSubject
 }: {
   repoRoot: string;
   remoteName: string;
   branch: string;
   expectedCommitSha?: string | null;
   expectedBaseSha?: string | null;
+  expectedCommitSubject?: string | null;
 }): Promise<ContainerRepoVerificationResult> => {
   const headSha = await runGit(repoRoot, ["rev-parse", "HEAD"]);
+  const commitSubject = await runGit(repoRoot, ["log", "-1", "--pretty=%s", "HEAD"]);
   const workingTreeStatus = await runGit(repoRoot, ["status", "--porcelain"]);
   const normalizedExpectedCommitSha = expectedCommitSha
     ? await resolveCommitSha(repoRoot, expectedCommitSha)
@@ -61,6 +65,12 @@ export const verifyContainerDocumentRepoPush = async ({
   if (normalizedExpectedCommitSha && headSha !== normalizedExpectedCommitSha) {
     throw new Error(
       `Container document store HEAD mismatch. Expected ${expectedCommitSha}, received ${headSha}.`
+    );
+  }
+
+  if (expectedCommitSubject && commitSubject !== expectedCommitSubject) {
+    throw new Error(
+      `Container document store commit subject mismatch. Expected ${JSON.stringify(expectedCommitSubject)}, received ${JSON.stringify(commitSubject)}.`
     );
   }
 
@@ -112,6 +122,7 @@ export const verifyContainerDocumentRepoPush = async ({
     baseSha: normalizedExpectedBaseSha || null,
     headSha,
     remoteSha,
-    commitCount
+    commitCount,
+    commitSubject
   };
 };

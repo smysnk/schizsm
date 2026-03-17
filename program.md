@@ -319,16 +319,18 @@ Expect the automation branch to be managed outside this file, but your run must:
 
 - inspect the working tree
 - stage the intended repository changes
-- create exactly one final commit that clearly references the prompt id
+- create exactly one final commit whose subject is a concise summary of the submitted prompt itself
 - push the resulting commit to the configured remote branch
 
 Do not create intermediate commits for separate parts of the run. In particular, do not split markdown edits, canvas updates, audit updates, or cleanup into separate commits. Stage the full successful result and commit once at the end.
 
-Preferred commit message shape:
+Commit subject rules:
 
 ```text
-prompt(<prompt-id>): reorganize knowledge base for submitted idea
+<concise summary of the submitted prompt>
 ```
+
+If the runner supplies an exact required commit subject for the current run, use that exact subject verbatim.
 
 Do not reset, discard unrelated changes, or rewrite history unless the human explicitly asks for that.
 
