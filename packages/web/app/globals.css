@@ -342,13 +342,14 @@ a {
 }
 
 .prompt-zen__frame {
-  width: min(924px, calc(100vw - 72px));
-  max-width: 100%;
+  width: 924px;
+  max-width: calc(100vw - 72px);
 }
 
 .prompt-zen__lcd.retro-lcd {
   width: 100%;
   max-width: none;
+  height: 320px;
   min-height: 320px;
 }
 
@@ -1585,10 +1586,12 @@ a {
   }
 
   .prompt-zen__frame {
-    width: min(100%, calc(100vw - 20px));
+    width: calc(100vw - 20px);
+    max-width: 924px;
   }
 
   .prompt-zen__lcd.retro-lcd {
+    height: 292px;
     min-height: 292px;
   }
 
