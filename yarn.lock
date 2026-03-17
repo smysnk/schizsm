@@ -3214,7 +3214,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-dom@npm:^18.1.0":
+"react-dom@npm:^18.2.0":
   version: 18.3.1
   resolution: "react-dom@npm:18.3.1"
   dependencies:
@@ -3233,17 +3233,17 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-retro-lcd@file:../../references/react-retro-display::locator=web%40workspace%3Apackages%2Fweb":
-  version: 0.1.0
-  resolution: "react-retro-lcd@file:../../references/react-retro-display#../../references/react-retro-display::hash=a8a362&locator=web%40workspace%3Apackages%2Fweb"
+"react-retro-lcd@npm:react-retro-display-tty-ansi@0.1.11":
+  version: 0.1.11
+  resolution: "react-retro-display-tty-ansi@npm:0.1.11"
   peerDependencies:
     react: ^18.2.0 || ^19.0.0
     react-dom: ^18.2.0 || ^19.0.0
-  checksum: 10c0/0dea0580ce39cf920a91c4657f5d7763dfbc5e641229a41a31ac1dd6a8b6df58135eaa9f065ec5721a4520e4aa25790e4b70f4d73c916fd56fd06c36ef315156
+  checksum: 10c0/df180c06440da5673a1b91f99df4cecc33638bf5ba3b5fa1c1e1ec517a65d0d76b6d00e8dadad79b45c1da3c71880aa75e5f2142318414455e369b0641b30feb
   languageName: node
   linkType: hard
 
-"react@npm:^18.1.0":
+"react@npm:^18.2.0":
   version: 18.3.1
   resolution: "react@npm:18.3.1"
   dependencies:
@@ -4046,9 +4046,9 @@ __metadata:
     graphql: "npm:^16.8.1"
     graphql-ws: "npm:^5.16.2"
     next: "npm:^15.5.12"
-    react: "npm:^18.1.0"
-    react-dom: "npm:^18.1.0"
-    react-retro-lcd: "file:../../references/react-retro-display"
+    react: "npm:^18.2.0"
+    react-dom: "npm:^18.2.0"
+    react-retro-lcd: "npm:react-retro-display-tty-ansi@0.1.11"
     typescript: "npm:^5.7.2"
   languageName: unknown
   linkType: soft

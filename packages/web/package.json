@@ -13,9 +13,9 @@
     "graphql": "^16.8.1",
     "graphql-ws": "^5.16.2",
     "next": "^15.5.12",
-    "react": "^18.1.0",
-    "react-dom": "^18.1.0",
-    "react-retro-lcd": "file:../../references/react-retro-display"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-retro-lcd": "npm:react-retro-display-tty-ansi@0.1.11"
   },
   "devDependencies": {
     "@types/node": "^22.10.1",

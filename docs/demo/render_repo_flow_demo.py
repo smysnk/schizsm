@@ -271,6 +271,87 @@ def wrap_text(
     return lines
 
 
+def ellipsize_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> str:
+    if draw.textlength(text, font=font) <= max_width:
+        return text
+
+    ellipsis = "…"
+    candidate = text
+    while candidate:
+        candidate = candidate[:-1]
+        trial = candidate.rstrip() + ellipsis
+        if draw.textlength(trial, font=font) <= max_width:
+            return trial
+
+    return ellipsis
+
+
+def wrap_path_text(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+) -> list[str]:
+    tokens: list[str] = []
+    current = ""
+    separators = {"/", "-", "_"}
+
+    for character in text:
+        current += character
+        if character in separators:
+            tokens.append(current)
+            current = ""
+
+    if current:
+        tokens.append(current)
+
+    lines: list[str] = []
+    current_line = ""
+
+    for token in tokens:
+        trial = f"{current_line}{token}"
+        if not current_line or draw.textlength(trial, font=font) <= max_width:
+            current_line = trial
+            continue
+
+        if current_line:
+            lines.append(current_line)
+        current_line = token
+
+        while draw.textlength(current_line, font=font) > max_width and len(current_line) > 1:
+            split_index = max(1, len(current_line) - 4)
+            head = current_line[:split_index]
+            tail = current_line[split_index:]
+            lines.append(ellipsize_text(draw, head, font, max_width))
+            current_line = tail
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines
+
+
+def fit_lines(
+    draw: ImageDraw.ImageDraw,
+    lines: list[str],
+    font: ImageFont.FreeTypeFont,
+    max_width: int,
+    max_lines: int,
+) -> list[str]:
+    if len(lines) <= max_lines:
+        return lines
+
+    trimmed = lines[: max_lines - 1]
+    remainder = " ".join(lines[max_lines - 1 :])
+    trimmed.append(ellipsize_text(draw, remainder, font, max_width))
+    return trimmed
+
+
 def blend_color(
     start: tuple[int, int, int, int],
     end: tuple[int, int, int, int],
@@ -308,9 +389,16 @@ def draw_prompt_panel(
         y += 34
 
     draw.text((66, 250), "Decision", font=fonts["label"], fill=TEXT_DIM)
-    for line in wrap_text(draw, round_data.summary, fonts["small"], 510):
-        draw.text((66, y := y + 8), line, font=fonts["small"], fill=TEXT_SOFT)
-        y += 24
+    decision_y = 274
+    for line in fit_lines(
+        draw,
+        wrap_text(draw, round_data.summary, fonts["small"], 510),
+        fonts["small"],
+        510,
+        2,
+    ):
+        draw.text((66, decision_y), line, font=fonts["small"], fill=TEXT_SOFT)
+        decision_y += 24
 
     draw.text((66, 305), "Ops this round", font=fonts["label"], fill=TEXT_DIM)
     op_y = 338
@@ -318,11 +406,22 @@ def draw_prompt_panel(
         is_active = index == op_index
         fill = ACCENT if is_active else TEXT_SOFT
         badge_fill = tone_color("merge" if "merge" in operation else "create" if "create" in operation else "delete" if "delete" in operation else "update")
+        op_lines = fit_lines(
+            draw,
+            wrap_path_text(draw, operation, fonts["small"], 474),
+            fonts["small"],
+            474,
+            2,
+        )
+        row_height = 18 + (len(op_lines) * 20)
         if is_active:
-            draw.rounded_rectangle((66, op_y - 8, 592, op_y + 24), radius=10, fill=(19, 55, 29, 180))
+            draw.rounded_rectangle((66, op_y - 8, 592, op_y - 8 + row_height), radius=10, fill=(19, 55, 29, 180))
         draw.rounded_rectangle((78, op_y - 1, 88, op_y + 9), radius=4, fill=badge_fill)
-        draw.text((102, op_y - 12), operation, font=fonts["small"], fill=fill)
-        op_y += 34
+        line_y = op_y - 12
+        for line in op_lines:
+            draw.text((102, line_y), line, font=fonts["small"], fill=fill)
+            line_y += 18
+        op_y += row_height + 2
 
 
 def draw_file_tree(
@@ -340,15 +439,26 @@ def draw_file_tree(
         fill = tone_color(entry.tone)
         is_related = any(token in active_op for token in entry.path.replace(".md", "").split("/"))
         bg_fill = (18, 52, 30, 180) if is_related else PANEL_SOFT
-        draw.rounded_rectangle((66, y - 8, 590, y + 22), radius=10, fill=bg_fill)
-        draw.text((82, y - 10), entry.path, font=fonts["small"], fill=fill)
+        path_lines = fit_lines(
+            draw,
+            wrap_path_text(draw, entry.path, fonts["small"], 366),
+            fonts["small"],
+            366,
+            2,
+        )
+        row_height = 16 + (len(path_lines) * 20)
+        draw.rounded_rectangle((66, y - 8, 590, y - 8 + row_height), radius=10, fill=bg_fill)
+        line_y = y - 10
+        for line in path_lines:
+            draw.text((82, line_y), line, font=fonts["small"], fill=fill)
+            line_y += 18
         if entry.tone != "normal":
             badge_x = 466
             badge_text = entry.tone.upper()
             badge_width = badge_x + 102
             draw.rounded_rectangle((badge_x, y - 8, badge_width, y + 18), radius=10, outline=fill, width=2)
             draw.text((badge_x + 14, y - 10), badge_text, font=fonts["label"], fill=fill)
-        y += 40
+        y += row_height + 10
 
 
 def draw_canvas(
@@ -393,13 +503,29 @@ def draw_canvas(
         card = (node.x, node.y, node.x + 190, node.y + 78)
         draw.rounded_rectangle(card, radius=16, fill=fill, outline=outline, width=2)
         label = node.title + (" ?" if node.hypothesis else "")
-        text_lines = wrap_text(draw, label, fonts["small"], 160)
+        text_lines = fit_lines(
+            draw,
+            wrap_text(draw, label, fonts["small"], 160),
+            fonts["small"],
+            160,
+            2,
+        )
         y = node.y + 18
         for line in text_lines:
             draw.text((node.x + 18, y), line, font=fonts["small"], fill=TEXT)
             y += 22
 
-    draw.text((692, 590), round_data.hypothesis_state, font=fonts["small"], fill=TEXT_DIM)
+    hypothesis_lines = fit_lines(
+        draw,
+        wrap_text(draw, round_data.hypothesis_state, fonts["small"], 810),
+        fonts["small"],
+        810,
+        2,
+    )
+    hypothesis_y = 570
+    for line in hypothesis_lines:
+        draw.text((692, hypothesis_y), line, font=fonts["small"], fill=TEXT_DIM)
+        hypothesis_y += 22
 
 
 def draw_timeline(
@@ -418,7 +544,8 @@ def draw_timeline(
         width = 190
         draw.rounded_rectangle((x, y, x + width, y + 52), radius=14, fill=PANEL_SOFT, outline=border, width=2)
         draw.text((x + 16, y + 8), round_data.title, font=fonts["small"], fill=fill)
-        draw.text((x + 16, y + 28), round_data.summary[:24] + ("…" if len(round_data.summary) > 24 else ""), font=fonts["label"], fill=TEXT_DIM)
+        summary = ellipsize_text(draw, round_data.summary, fonts["label"], 156)
+        draw.text((x + 16, y + 28), summary, font=fonts["label"], fill=TEXT_DIM)
         x += width + 14
 
 
@@ -436,8 +563,19 @@ def render_round_frame(
     draw_canvas(draw, ROUNDS[round_index], fonts, op_progress)
     draw_timeline(draw, round_index, fonts)
 
-    draw.text((676, 830), "From left to right: prompt -> repo diff -> top-down Obsidian canvas.", font=fonts["label"], fill=TEXT_DIM)
-    draw.text((676, 852), "Creates, merges, deletes, and hypothesis changes accumulate across prompts.", font=fonts["label"], fill=TEXT_DIM)
+    footer_lines = [
+        "From left to right: prompt -> repo diff -> top-down Obsidian canvas.",
+        "Creates, merges, deletes, and hypothesis changes accumulate across prompts.",
+    ]
+    footer_y = 830
+    for footer in footer_lines:
+        draw.text(
+            (676, footer_y),
+            ellipsize_text(draw, footer, fonts["label"], 848),
+            font=fonts["label"],
+            fill=TEXT_DIM,
+        )
+        footer_y += 22
     return frame
 
 

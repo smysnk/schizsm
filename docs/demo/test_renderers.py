@@ -128,6 +128,32 @@ class DemoRendererTests(unittest.TestCase):
             * (render_repo_flow_demo.PROMPT_HOLD_FRAMES + render_repo_flow_demo.ROUND_SETTLE_FRAMES)
         )
 
+    def test_repo_flow_demo_wraps_long_file_paths_to_fit_panels(self):
+        font = render_repo_flow_demo.ImageFont.truetype(
+            str(render_repo_flow_demo.ensure_font()),
+            render_repo_flow_demo.SMALL_FONT_SIZE
+        )
+        draw = render_repo_flow_demo.ImageDraw.Draw(
+            render_repo_flow_demo.Image.new("RGBA", (1, 1))
+        )
+        lines = render_repo_flow_demo.fit_lines(
+            draw,
+            render_repo_flow_demo.wrap_path_text(
+                draw,
+                "hypotheses/repetitive-chores-lower-resistance.md",
+                font,
+                366
+            ),
+            font,
+            366,
+            2
+        )
+
+        self.assertGreaterEqual(len(lines), 1)
+        self.assertLessEqual(len(lines), 2)
+        for line in lines:
+            self.assertLessEqual(draw.textlength(line, font=font), 366)
+
 
 if __name__ == "__main__":
     unittest.main()
