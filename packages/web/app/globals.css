@@ -342,18 +342,18 @@ a {
 }
 
 .prompt-zen__frame {
-  width: min(840px, calc(100vw - 88px));
+  width: min(924px, calc(100vw - 72px));
   max-width: 100%;
 }
 
 .prompt-zen__lcd.retro-lcd {
   width: 100%;
   max-width: none;
-  min-height: 220px;
+  min-height: 320px;
 }
 
 .prompt-zen__lcd .retro-lcd__viewport {
-  padding: 34px 38px;
+  padding: 28px 38px;
 }
 
 .prompt-zen__lcd .retro-lcd__grid {
@@ -375,8 +375,8 @@ a {
   --prompt-bezel: rgba(143, 255, 156, 0.18);
   --prompt-glow: rgba(97, 255, 129, 0.18);
   position: relative;
-  width: min(840px, calc(100vw - 88px));
-  min-height: 220px;
+  width: min(924px, calc(100vw - 72px));
+  min-height: 320px;
   border-radius: 10px;
   display: block;
   overflow: hidden;
@@ -470,7 +470,7 @@ a {
   position: relative;
   z-index: 1;
   width: 100%;
-  min-height: 220px;
+  min-height: 268px;
 }
 
 .prompt-zen__cursor-measure {
@@ -516,8 +516,8 @@ a {
 }
 
 .prompt-zen__core textarea {
-  min-height: 220px;
-  max-height: 340px;
+  min-height: 268px;
+  max-height: 420px;
   border: 0;
   background: transparent;
   resize: none;
@@ -541,8 +541,8 @@ a {
 
 .prompt-zen__terminal {
   box-sizing: border-box;
-  min-height: 220px;
-  max-height: 340px;
+  min-height: 268px;
+  max-height: 420px;
   overflow: hidden;
   padding: 34px 38px;
 }
@@ -1585,15 +1585,15 @@ a {
   }
 
   .prompt-zen__frame {
-    width: min(100%, calc(100vw - 28px));
+    width: min(100%, calc(100vw - 20px));
   }
 
   .prompt-zen__lcd.retro-lcd {
-    min-height: 240px;
+    min-height: 292px;
   }
 
   .prompt-zen__lcd .retro-lcd__viewport {
-    padding: 24px 22px;
+    padding: 20px 22px;
   }
 
   .prompt-zen__lcd .retro-lcd__grid {
@@ -1601,8 +1601,8 @@ a {
   }
 
   .prompt-zen__form {
-    width: min(100%, calc(100vw - 28px));
-    min-height: 240px;
+    width: min(100%, calc(100vw - 20px));
+    min-height: 292px;
     border-radius: 12px;
   }
 

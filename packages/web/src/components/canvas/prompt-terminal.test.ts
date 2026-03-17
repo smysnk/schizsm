@@ -134,8 +134,8 @@ test("buildPromptTerminalWorkingEntry shows an active working line only for in-f
   assert.equal(buildPromptTerminalWorkingEntry(completedPrompt, 2), null);
 });
 
-test("buildPromptTerminalBuffer keeps user text plain and dims system lines with ansi", () => {
-  const buffer = buildPromptTerminalBuffer("User line", [
+test("buildPromptTerminalBuffer keeps user text plain, dims system lines with ansi, and emits CRLF", () => {
+  const buffer = buildPromptTerminalBuffer("User line\ncontinued", [
     { id: "ack", text: "OK", tone: "system", kind: "ack" },
     { id: "blank", text: "", tone: "system", kind: "blank" },
     { id: "status", text: "# running codex cli", tone: "system", kind: "status" }
@@ -144,11 +144,11 @@ test("buildPromptTerminalBuffer keeps user text plain and dims system lines with
   assert.equal(
     buffer,
     [
-      "User line",
+      "User line\r\ncontinued",
       "\u001b[2mOK\u001b[0m",
       "",
       "\u001b[2m# running codex cli\u001b[0m"
-    ].join("\n")
+    ].join("\r\n")
   );
 });
 

@@ -30,25 +30,32 @@ const resolveCommitSha = async (repoRoot: string, sha: string) => {
 export type ContainerRepoVerificationResult = {
   branch: string;
   remoteName: string;
+  baseSha: string | null;
   headSha: string;
   remoteSha: string;
+  commitCount: number;
 };
 
 export const verifyContainerDocumentRepoPush = async ({
   repoRoot,
   remoteName,
   branch,
-  expectedCommitSha
+  expectedCommitSha,
+  expectedBaseSha
 }: {
   repoRoot: string;
   remoteName: string;
   branch: string;
   expectedCommitSha?: string | null;
+  expectedBaseSha?: string | null;
 }): Promise<ContainerRepoVerificationResult> => {
   const headSha = await runGit(repoRoot, ["rev-parse", "HEAD"]);
   const workingTreeStatus = await runGit(repoRoot, ["status", "--porcelain"]);
   const normalizedExpectedCommitSha = expectedCommitSha
     ? await resolveCommitSha(repoRoot, expectedCommitSha)
+    : "";
+  const normalizedExpectedBaseSha = expectedBaseSha
+    ? await resolveCommitSha(repoRoot, expectedBaseSha)
     : "";
 
   if (normalizedExpectedCommitSha && headSha !== normalizedExpectedCommitSha) {
@@ -60,6 +67,19 @@ export const verifyContainerDocumentRepoPush = async ({
   if (workingTreeStatus) {
     throw new Error(
       `Container document store has uncommitted changes after Codex completed:\n${workingTreeStatus}`
+    );
+  }
+
+  const commitCount = normalizedExpectedBaseSha
+    ? Number.parseInt(
+        await runGit(repoRoot, ["rev-list", "--count", `${normalizedExpectedBaseSha}..${headSha}`]),
+        10
+      )
+    : 0;
+
+  if (normalizedExpectedBaseSha && commitCount !== 1) {
+    throw new Error(
+      `Container document store commit verification failed. Expected exactly 1 commit after ${expectedBaseSha}, found ${commitCount}.`
     );
   }
 
@@ -89,7 +109,9 @@ export const verifyContainerDocumentRepoPush = async ({
   return {
     branch,
     remoteName,
+    baseSha: normalizedExpectedBaseSha || null,
     headSha,
-    remoteSha
+    remoteSha,
+    commitCount
   };
 };

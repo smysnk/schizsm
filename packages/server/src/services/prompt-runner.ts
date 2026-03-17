@@ -122,6 +122,28 @@ type GitOperationTrace = {
   command: string;
 };
 
+export const resolvePromptExecutionRoots = ({
+  repoRoot,
+  documentStoreRoot,
+  documentStoreHasDedicatedGitRepo
+}: {
+  repoRoot: string;
+  documentStoreRoot: string;
+  documentStoreHasDedicatedGitRepo: boolean;
+}) => {
+  if (documentStoreHasDedicatedGitRepo) {
+    return {
+      codexRepoRoot: documentStoreRoot,
+      auditSyncRepoRoot: documentStoreRoot
+    };
+  }
+
+  return {
+    codexRepoRoot: repoRoot,
+    auditSyncRepoRoot: repoRoot
+  };
+};
+
 const PROMPT_RUNNER_LEASE_KEY = 41_042_006;
 
 export type PromptRunnerStateSnapshot = {
@@ -193,6 +215,7 @@ const summarizeErrorStack = (error: unknown) => {
 const buildInstruction = ({
   prompt,
   repoRoot,
+  executionRepoRoot,
   documentStoreRoot,
   programPath,
   auditPath,
@@ -205,6 +228,7 @@ const buildInstruction = ({
 }: {
   prompt: Prompt;
   repoRoot: string;
+  executionRepoRoot: string;
   documentStoreRoot: string;
   programPath: string;
   auditPath: string;
@@ -217,6 +241,7 @@ const buildInstruction = ({
 }) => `You are processing a queued repository-maintenance prompt for this project.
 
 Repository root: ${repoRoot}
+Execution repository root: ${executionRepoRoot}
 Document store root: ${documentStoreRoot}
 Program contract: ${programPath}
 Audit log: ${auditPath}
@@ -239,6 +264,7 @@ Before making changes:
     ? `The document store at ${documentStoreRoot} is its own dedicated Git repository. Perform commit/push operations inside that repository, not the outer controller repository at ${repoRoot}.`
     : `If you need to commit and push, use the repository rooted at ${repoRoot}.`
 }
+- The default git working directory for this run is ${executionRepoRoot}. Any commit or push must happen there.
 - Treat every path outside ${documentStoreRoot} as read-only unless the human explicitly asked otherwise.
 - Treat ${path.join(repoRoot, "packages")} and ${path.join(repoRoot, "scripts")} as read-only unless absolutely required by the contract.
 
@@ -251,6 +277,7 @@ Run requirements:
 - Update markdown and canvas files according to the contract in program.md.
 - Append exactly one audit section to ${auditPath} using the required markers for prompt ${prompt.id} if the run reaches a coherent stopping point.
 - Commit and push the resulting repository changes if the run succeeds.
+- Create exactly one final commit for the entire prompt run. Do not create intermediate commits for markdown changes, canvas updates, audit updates, or any other partial step.
 - Return only a single JSON object that matches ${schemaPath}.
 - The returned JSON must use promptId "${prompt.id}".
 `;
@@ -316,6 +343,86 @@ const runGit = async (
   });
 
   return stdout.trim();
+};
+
+const resolveCommitSha = async (
+  repoRoot: string,
+  refOrSha: string,
+  gitOperations?: JsonObject[]
+) => {
+  const normalized = refOrSha.trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    return await runGit(repoRoot, ["rev-parse", `${normalized}^{commit}`], gitOperations);
+  } catch {
+    return normalized;
+  }
+};
+
+const verifySinglePromptCommit = async ({
+  repoRoot,
+  expectedBaseSha,
+  expectedCommitSha,
+  headRef = "HEAD",
+  statusPathspecs = [],
+  gitOperations
+}: {
+  repoRoot: string;
+  expectedBaseSha: string;
+  expectedCommitSha?: string | null;
+  headRef?: string;
+  statusPathspecs?: string[];
+  gitOperations?: JsonObject[];
+}) => {
+  const headSha = await runGit(repoRoot, ["rev-parse", headRef], gitOperations);
+  const workingTreeStatus = await runGit(
+    repoRoot,
+    ["status", "--porcelain", ...(statusPathspecs.length ? ["--", ...statusPathspecs] : [])],
+    gitOperations
+  );
+  const normalizedExpectedBaseSha = await resolveCommitSha(
+    repoRoot,
+    expectedBaseSha,
+    gitOperations
+  );
+  const normalizedExpectedCommitSha = expectedCommitSha
+    ? await resolveCommitSha(repoRoot, expectedCommitSha, gitOperations)
+    : "";
+
+  if (normalizedExpectedCommitSha && headSha !== normalizedExpectedCommitSha) {
+    throw new Error(
+      `Prompt commit verification failed. Expected ${expectedCommitSha}, received ${headSha}.`
+    );
+  }
+
+  if (workingTreeStatus) {
+    throw new Error(`Prompt repository has uncommitted changes after Codex completed:\n${workingTreeStatus}`);
+  }
+
+  const commitCount = Number.parseInt(
+    await runGit(
+      repoRoot,
+      ["rev-list", "--count", `${normalizedExpectedBaseSha}..${headSha}`],
+      gitOperations
+    ),
+    10
+  );
+
+  if (commitCount !== 1) {
+    throw new Error(
+      `Prompt commit verification failed. Expected exactly 1 commit after ${expectedBaseSha}, found ${commitCount}.`
+    );
+  }
+
+  return {
+    baseSha: normalizedExpectedBaseSha,
+    headSha,
+    commitCount
+  };
 };
 
 const ensureContainerDocumentRepo = async ({
@@ -794,6 +901,10 @@ export class PromptRunner {
       let automationBranch = env.promptRunnerAutomationBranch;
       let documentStoreIsRepoRoot = false;
       let documentStoreHasDedicatedGitRepo = false;
+      let codexRepoRoot = "";
+      let auditSyncRepoRoot = "";
+      let worktreeBaseCommitSha = "";
+      let documentStoreBaseCommitSha = "";
 
       if (env.promptRunnerExecutionMode === "container") {
         containerDocumentRepo = await ensureContainerDocumentRepo({
@@ -815,6 +926,7 @@ export class PromptRunner {
         automationBranch = containerDocumentRepo.branch;
         documentStoreIsRepoRoot = true;
         documentStoreHasDedicatedGitRepo = true;
+        documentStoreBaseCommitSha = await runGit(repoRoot, ["rev-parse", "HEAD"], gitOperations);
 
         Object.assign(runnerMetadata, {
           executionMode: "container",
@@ -862,6 +974,11 @@ export class PromptRunner {
           promptBranch =
             preparedWorktree.documentStoreCloneBranch || env.promptRunnerContainerRepoBranch;
           automationBranch = promptBranch;
+          documentStoreBaseCommitSha = await runGit(
+            documentStoreRoot,
+            ["rev-parse", "HEAD"],
+            gitOperations
+          );
         } else {
           remoteName = preparedWorktree.remoteName;
           remoteUrl = await runGit(
@@ -872,6 +989,11 @@ export class PromptRunner {
           remoteConfigured = preparedWorktree.remoteConfigured;
           promptBranch = preparedWorktree.promptBranch;
           automationBranch = preparedWorktree.automationBranch;
+          worktreeBaseCommitSha = await runGit(
+            repoRoot,
+            ["rev-parse", preparedWorktree.promptBranch],
+            gitOperations
+          );
         }
 
         Object.assign(runnerMetadata, {
@@ -903,6 +1025,23 @@ export class PromptRunner {
         });
       }
 
+      ({ codexRepoRoot, auditSyncRepoRoot } = resolvePromptExecutionRoots({
+        repoRoot,
+        documentStoreRoot,
+        documentStoreHasDedicatedGitRepo: documentStoreIsRepoRoot || documentStoreHasDedicatedGitRepo
+      }));
+
+      if (worktreeBaseCommitSha) {
+        runnerMetadata.initialCommitSha = worktreeBaseCommitSha;
+      }
+
+      if (documentStoreBaseCommitSha) {
+        runnerMetadata.documentStoreInitialCommitSha = documentStoreBaseCommitSha;
+      }
+
+      runnerMetadata.executionRepoRoot = codexRepoRoot;
+      runnerMetadata.auditSyncRepoRoot = auditSyncRepoRoot;
+
       preflightCanvasReport = await validateCanvasState({
         repoRoot,
         knowledgeRoot: documentStoreRoot,
@@ -931,6 +1070,7 @@ export class PromptRunner {
       const instruction = buildInstruction({
         prompt,
         repoRoot,
+        executionRepoRoot: codexRepoRoot,
         documentStoreRoot,
         programPath,
         auditPath,
@@ -950,7 +1090,7 @@ export class PromptRunner {
       const execution = await executeCodex({
         instruction,
         artifacts,
-        repoRoot,
+        repoRoot: codexRepoRoot,
         schemaPath
       });
 
@@ -994,6 +1134,7 @@ export class PromptRunner {
 
       let containerVerification: JsonObject | null = null;
       let clonedDocumentStoreVerification: JsonObject | null = null;
+      let worktreeCommitVerification: JsonObject | null = null;
 
       if (
         env.promptRunnerExecutionMode === "container" &&
@@ -1005,7 +1146,8 @@ export class PromptRunner {
             repoRoot,
             remoteName: containerDocumentRepo.remoteName,
             branch: containerDocumentRepo.branch,
-            expectedCommitSha: finalOutput.git.commitSha
+            expectedCommitSha: finalOutput.git.commitSha,
+            expectedBaseSha: documentStoreBaseCommitSha
           })
         ) as JsonObject;
       }
@@ -1021,7 +1163,24 @@ export class PromptRunner {
             repoRoot: documentStoreRoot,
             remoteName: "origin",
             branch: preparedWorktree.documentStoreCloneBranch,
-            expectedCommitSha: finalOutput.git.commitSha
+            expectedCommitSha: finalOutput.git.commitSha,
+            expectedBaseSha: documentStoreBaseCommitSha
+          })
+        ) as JsonObject;
+      } else if (
+        env.promptRunnerExecutionMode !== "container" &&
+        terminalStatus === "completed" &&
+        preparedWorktree &&
+        worktreeBaseCommitSha
+      ) {
+        worktreeCommitVerification = toJsonValue(
+          await verifySinglePromptCommit({
+            repoRoot,
+            expectedBaseSha: worktreeBaseCommitSha,
+            expectedCommitSha: finalOutput.git.commitSha,
+            headRef: preparedWorktree.promptBranch,
+            statusPathspecs: [preparedWorktree.documentStoreDir],
+            gitOperations
           })
         ) as JsonObject;
       }
@@ -1056,7 +1215,7 @@ export class PromptRunner {
         auditSyncResult = await executeAuditSync({
           promptId: prompt.id,
           artifacts,
-          repoRoot,
+          repoRoot: auditSyncRepoRoot,
           auditPath,
           scriptRepoRoot: controllerRepoRoot
         });
@@ -1065,13 +1224,24 @@ export class PromptRunner {
       }
 
       if (terminalStatus === "completed" && preparedWorktree) {
-        await transitionTo("committing", "Promoting the prompt branch onto the automation branch.");
+        await transitionTo(
+          "committing",
+          preparedWorktree.outerAutomationRemoteSync
+            ? "Promoting the prompt branch onto the automation branch."
+            : "Cleaning prompt worktree after dedicated document-store commit."
+        );
         finalizedWorktree = toJsonValue(
           await finalizePromptWorktree(preparedWorktree)
         ) as JsonObject;
-        await transitionTo("pushing", "Automation branch pushed. Cleaning prompt worktree.", {
-          finalizedWorktree
-        });
+        await transitionTo(
+          "pushing",
+          preparedWorktree.outerAutomationRemoteSync
+            ? "Automation branch pushed. Cleaning prompt worktree."
+            : "Dedicated document-store branch verified. Cleaning prompt worktree.",
+          {
+            finalizedWorktree
+          }
+        );
       }
 
       await updatePrompt(prompt.id, {
@@ -1117,6 +1287,7 @@ export class PromptRunner {
                 controllerRemovedPaths: preparedWorktree.controllerRemovedPaths,
                 remoteConfigured: preparedWorktree.remoteConfigured,
                 outerAutomationRemoteSync: preparedWorktree.outerAutomationRemoteSync,
+                commitVerification: worktreeCommitVerification,
                 documentStoreVerification: clonedDocumentStoreVerification,
                 finalized: finalizedWorktree
               }

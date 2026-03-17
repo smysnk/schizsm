@@ -313,14 +313,16 @@ Empty sections are allowed when no changes of that type occurred, but the sectio
 
 ## Git Contract
 
-You are required to finish each successful run with git commit and git push.
+You are required to finish each successful run with exactly one git commit and one git push.
 
 Expect the automation branch to be managed outside this file, but your run must:
 
 - inspect the working tree
 - stage the intended repository changes
-- create a commit that clearly references the prompt id
+- create exactly one final commit that clearly references the prompt id
 - push the resulting commit to the configured remote branch
+
+Do not create intermediate commits for separate parts of the run. In particular, do not split markdown edits, canvas updates, audit updates, or cleanup into separate commits. Stage the full successful result and commit once at the end.
 
 Preferred commit message shape:
 

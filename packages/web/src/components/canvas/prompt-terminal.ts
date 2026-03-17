@@ -18,6 +18,7 @@ export type PromptTerminalEntry = {
 
 const ansiFaint = "\u001b[2m";
 const ansiReset = "\u001b[0m";
+const carriageReturnLineFeed = "\r\n";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -273,7 +274,8 @@ export const buildPromptTerminalBuffer = (
   promptContent: string,
   entries: PromptTerminalEntry[]
 ) => {
-  const lines = [promptContent];
+  const normalizeLineEndings = (value: string) => value.replace(/\r?\n/g, carriageReturnLineFeed);
+  const lines = [normalizeLineEndings(promptContent)];
 
   for (const entry of entries) {
     if (!entry.text) {
@@ -282,14 +284,14 @@ export const buildPromptTerminalBuffer = (
     }
 
     if (entry.tone === "system") {
-      lines.push(`${ansiFaint}${entry.text}${ansiReset}`);
+      lines.push(`${ansiFaint}${normalizeLineEndings(entry.text)}${ansiReset}`);
       continue;
     }
 
-    lines.push(entry.text);
+    lines.push(normalizeLineEndings(entry.text));
   }
 
-  return lines.join("\n");
+  return lines.join(carriageReturnLineFeed);
 };
 
 export const getNextTypedTerminalEntries = (

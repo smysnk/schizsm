@@ -392,6 +392,15 @@ test("preparePromptWorktree replaces DOCUMENT_STORE_DIR with a fresh clone when 
       await readFile(path.join(repoRoot, "docs", "demo", "schizm-demo.webp"))
     );
 
+    await writeFile(
+      path.join(prepared.worktreePath, "docs", "demo", "schizm-demo.webp"),
+      Buffer.from("modified-demo-binary")
+    );
+    await writeFile(
+      path.join(prepared.worktreePath, "docs", "demo", "schizm-placeholder-demo.webp"),
+      Buffer.from("modified-placeholder-demo-binary")
+    );
+
     const finalized = await finalizePromptWorktree(prepared);
 
     assert.equal(finalized.worktreeRemoved, true);
