@@ -82,6 +82,15 @@
       "height": 220
     },
     {
+      "id": "emergency-broadcast-system-fragment",
+      "type": "file",
+      "file": "fragments/emergency-broadcast-system-test.md",
+      "x": 760,
+      "y": 2360,
+      "width": 360,
+      "height": 220
+    },
+    {
       "id": "iconoclast-highlander-fragment",
       "type": "file",
       "file": "fragments/iconoclast-highlander.md",
@@ -136,6 +145,11 @@
       "id": "edge-index-iconoclast-highlander-fragment",
       "fromNode": "index",
       "toNode": "iconoclast-highlander-fragment"
+    },
+    {
+      "id": "edge-index-emergency-broadcast-system-fragment",
+      "fromNode": "index",
+      "toNode": "emergency-broadcast-system-fragment"
     },
     {
       "id": "edge-inbox-clarifier",

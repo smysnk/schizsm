@@ -9,6 +9,7 @@
 
 ## Fragments
 
+- [[fragments/emergency-broadcast-system-test]]
 - [[fragments/iconoclast-highlander]]
 - [[fragments/it-hurts-when-ip]]
 - [[fragments/roses-are-red-violets-are-blue]]
@@ -31,3 +32,5 @@ It also includes a note capturing the frequency illusion as a concept that stood
 It now also includes a short fragment captured exactly as submitted about hurting when IP.
 
 It now also includes a short fragment comparing iconoclasm to Highlander.
+
+It also includes a short fragment preserving a test statement about the emergency broadcast system.
