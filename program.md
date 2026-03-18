@@ -65,11 +65,9 @@ Your responsibilities during a run are:
 3. Decide how the new idea should be integrated, and whether it has any plausible but still-unproven relation to earlier notes.
 4. Update markdown files, hypothesis notes, and canvas files inside `obsidian-repository/` accordingly.
 5. Append one strict audit section to `obsidian-repository/audit.md`.
-6. Commit the resulting changes.
-7. Push the commit to the configured remote branch.
-8. Return a structured final response that matches `schemas/codex-run-output.schema.json`.
+6. Return a structured final response that matches `schemas/codex-run-output.schema.json`.
 
-Do not stop after analysis. Finish the repository updates, audit entry, commit, push, and structured final response unless you are blocked by a real execution failure.
+Do not stop after analysis. Finish the repository updates, audit entry, and structured final response unless you are blocked by a real execution failure.
 
 When editing content, do not expand on the user's ideas, speculate beyond what was said, or add new conceptual material of your own. You may:
 
@@ -313,16 +311,16 @@ Empty sections are allowed when no changes of that type occurred, but the sectio
 
 ## Git Contract
 
-You are required to finish each successful run with exactly one git commit and one git push.
+The runner will finish each successful run with exactly one git commit and one git push after it appends timing metadata to the audit entry.
 
-Expect the automation branch to be managed outside this file, but your run must:
+Expect the automation branch to be managed outside this file. Your run must:
 
 - inspect the working tree
-- stage the intended repository changes
-- create exactly one final commit whose subject is a concise summary of the submitted prompt itself
-- push the resulting commit to the configured remote branch
+- leave the intended repository changes staged only on disk, without creating a commit
+- leave `obsidian-repository/audit.md` updated with the new prompt section, but without queue/processing timing fields
+- return enough structured output for the runner to append timing metadata, create the one final commit, and push it
 
-Do not create intermediate commits for separate parts of the run. In particular, do not split markdown edits, canvas updates, audit updates, or cleanup into separate commits. Stage the full successful result and commit once at the end.
+Do not create intermediate commits for separate parts of the run. Do not create any commits or push any branches yourself. The runner performs the single final commit and push after it adds the programmatic timing details.
 
 Commit subject rules:
 
@@ -330,7 +328,7 @@ Commit subject rules:
 <concise summary of the submitted prompt>
 ```
 
-If the runner supplies an exact required commit subject for the current run, use that exact subject verbatim.
+If the runner supplies an exact required commit subject for the current run, include that subject in your reasoning and final output context, but do not run `git commit` yourself.
 
 Do not reset, discard unrelated changes, or rewrite history unless the human explicitly asks for that.
 

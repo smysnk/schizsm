@@ -41,6 +41,7 @@ type PromptAuditPayload = JsonObject & {
     relationship: string;
     disposition: string;
   }>;
+  timing?: JsonObject;
   hypotheses: JsonObject;
   rationales: JsonObject;
   rawSection: string;
@@ -328,6 +329,7 @@ export const buildAuditPayload = ({
     moved: toMovedArray(parsedJson.moved),
     canvas: toStringArray(parsedJson.canvas),
     contextualRelevance: toContextualRelevanceArray(parsedJson.contextualRelevance),
+    timing: isJsonObject(parsedJson.timing) ? toJsonObject(parsedJson.timing) : undefined,
     hypotheses: toJsonObject(parsedJson.hypotheses),
     rationales: toJsonObject(parsedJson.rationales),
     rawSection

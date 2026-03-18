@@ -38,6 +38,13 @@ test("sync prompt audit preserves contextual relevance and hypothesis state", ()
 ### Hypotheses
 - \`obsidian-repository/hypotheses/repeated-clock-time-may-relate-to-frequency-illusion.md\`: created as a tentative explanation link
 
+### Timing
+- Queued At: 2026-03-16T03:10:00Z
+- Started At: 2026-03-16T03:11:00Z
+- Finalized At: 2026-03-16T03:12:45Z
+- Time In Queue: 1m (60000 ms)
+- Processing Time: 1m 45s (105000 ms)
+
 ### Git
 - Branch: codex/mindmap
 - Commit: deadbeef
@@ -68,6 +75,13 @@ test("sync prompt audit preserves contextual relevance and hypothesis state", ()
       "disposition": "related_but_unproven"
     }
   ],
+  "timing": {
+    "queuedAt": "2026-03-16T03:10:00Z",
+    "startedAt": "2026-03-16T03:11:00Z",
+    "finalizedAt": "2026-03-16T03:12:45Z",
+    "queueWaitMs": 60000,
+    "processingMs": 105000
+  },
   "hypotheses": {
     "created": [
       "obsidian-repository/hypotheses/repeated-clock-time-may-relate-to-frequency-illusion.md"
@@ -121,5 +135,11 @@ test("sync prompt audit preserves contextual relevance and hypothesis state", ()
     disproved: [],
     resolved: []
   });
+  assert.deepEqual(payload.timing, {
+    queuedAt: "2026-03-16T03:10:00Z",
+    startedAt: "2026-03-16T03:11:00Z",
+    finalizedAt: "2026-03-16T03:12:45Z",
+    queueWaitMs: 60000,
+    processingMs: 105000
+  });
 });
-

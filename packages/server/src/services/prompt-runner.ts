@@ -20,6 +20,7 @@ import {
   type CanvasValidationReport
 } from "./canvas-validator";
 import { verifyContainerDocumentRepoPush } from "./container-document-repo";
+import { appendPromptTimingToAuditSection } from "./prompt-audit-timing";
 import {
   claimNextQueuedPrompt,
   recoverActivePrompts,
@@ -297,10 +298,10 @@ Before making changes:
 }
 - ${
   documentStoreHasDedicatedGitRepo
-    ? `The document store at ${documentStoreRoot} is its own dedicated Git repository. Perform commit/push operations inside that repository, not the outer controller repository at ${repoRoot}.`
-    : `If you need to commit and push, use the repository rooted at ${repoRoot}.`
+    ? `The document store at ${documentStoreRoot} is its own dedicated Git repository. The runner will perform the final commit/push there, not in the outer controller repository at ${repoRoot}.`
+    : `The runner will perform the final commit/push in the repository rooted at ${repoRoot}.`
 }
-- The default git working directory for this run is ${executionRepoRoot}. Any commit or push must happen there.
+- The default git working directory for this run is ${executionRepoRoot}. Make all file edits there, but leave the final git commit/push to the runner.
 - Treat every path outside ${documentStoreRoot} as read-only unless the human explicitly asked otherwise.
 - Treat ${path.join(repoRoot, "packages")} and ${path.join(repoRoot, "scripts")} as read-only unless absolutely required by the contract.
 
@@ -312,11 +313,12 @@ ${prompt.content}
 Run requirements:
 - Update markdown and canvas files according to the contract in program.md.
 - Append exactly one audit section to ${auditPath} using the required markers for prompt ${prompt.id} if the run reaches a coherent stopping point.
-- Commit and push the resulting repository changes if the run succeeds.
-- Create exactly one final commit for the entire prompt run. Do not create intermediate commits for markdown changes, canvas updates, audit updates, or any other partial step.
+- Do not commit or push changes yourself. The runner will append timing details to the audit entry, then create the single final commit and push.
+- Do not create intermediate commits for markdown changes, canvas updates, audit updates, or any other partial step.
 - Use this exact final commit subject: ${JSON.stringify(expectedCommitSubject)}
 - Return only a single JSON object that matches ${schemaPath}.
 - The returned JSON must use promptId "${prompt.id}".
+- In the returned JSON git object, report the target branch and leave commitSha as null with commitCreated=false and pushSucceeded=false.
 `;
 
 const createRunArtifacts = async (repoRoot: string, promptId: string) => {
@@ -380,6 +382,80 @@ const runGit = async (
   });
 
   return stdout.trim();
+};
+
+const assertHeadMatches = async ({
+  repoRoot,
+  expectedHeadSha,
+  headRef = "HEAD",
+  gitOperations
+}: {
+  repoRoot: string;
+  expectedHeadSha: string;
+  headRef?: string;
+  gitOperations?: JsonObject[];
+}) => {
+  const normalizedExpectedHeadSha = await resolveCommitSha(
+    repoRoot,
+    expectedHeadSha,
+    gitOperations
+  );
+  const currentHeadSha = await runGit(repoRoot, ["rev-parse", headRef], gitOperations);
+
+  if (currentHeadSha !== normalizedExpectedHeadSha) {
+    throw new Error(
+      `Codex created a commit before runner finalization. Expected ${normalizedExpectedHeadSha}, received ${currentHeadSha}.`
+    );
+  }
+};
+
+const createPromptCommit = async ({
+  repoRoot,
+  commitSubject,
+  pathspecs = [],
+  gitOperations
+}: {
+  repoRoot: string;
+  commitSubject: string;
+  pathspecs?: string[];
+  gitOperations?: JsonObject[];
+}) => {
+  if (pathspecs.length) {
+    await runGit(repoRoot, ["add", "--", ...pathspecs], gitOperations);
+  } else {
+    await runGit(repoRoot, ["add", "-A"], gitOperations);
+  }
+
+  const workingTreeStatus = await runGit(
+    repoRoot,
+    ["status", "--porcelain", ...(pathspecs.length ? ["--", ...pathspecs] : [])],
+    gitOperations
+  );
+
+  if (!workingTreeStatus) {
+    throw new Error("No repository changes were available for the final prompt commit.");
+  }
+
+  await runGit(repoRoot, ["commit", "-m", commitSubject], gitOperations);
+
+  return {
+    commitSha: await runGit(repoRoot, ["rev-parse", "HEAD"], gitOperations),
+    commitSubject
+  };
+};
+
+const pushPromptCommit = async ({
+  repoRoot,
+  remoteName,
+  branch,
+  gitOperations
+}: {
+  repoRoot: string;
+  remoteName: string;
+  branch: string;
+  gitOperations?: JsonObject[];
+}) => {
+  await runGit(repoRoot, ["push", "-u", remoteName, branch], gitOperations);
 };
 
 const resolveCommitSha = async (
@@ -1174,73 +1250,11 @@ export class PromptRunner {
       const terminalStatus =
         finalOutput.resultStatus === "failed" ? "failed" : "completed";
 
-      if (
-        env.promptRunnerExecutionMode === "container" &&
-        terminalStatus === "completed" &&
-        (!finalOutput.git.commitCreated ||
-          !finalOutput.git.pushSucceeded ||
-          !finalOutput.git.commitSha)
-      ) {
-        throw new Error(
-          "Container prompt runner mode requires Codex to create a commit and push it to the remote branch."
-        );
-      }
-
       let containerVerification: JsonObject | null = null;
       let clonedDocumentStoreVerification: JsonObject | null = null;
       let worktreeCommitVerification: JsonObject | null = null;
-
-      if (
-        env.promptRunnerExecutionMode === "container" &&
-        terminalStatus === "completed" &&
-        containerDocumentRepo
-      ) {
-        containerVerification = toJsonValue(
-          await verifyContainerDocumentRepoPush({
-            repoRoot,
-            remoteName: containerDocumentRepo.remoteName,
-            branch: containerDocumentRepo.branch,
-            expectedCommitSha: finalOutput.git.commitSha,
-            expectedBaseSha: documentStoreBaseCommitSha,
-            expectedCommitSubject
-          })
-        ) as JsonObject;
-      }
-
-      if (
-        env.promptRunnerExecutionMode !== "container" &&
-        terminalStatus === "completed" &&
-        preparedWorktree?.documentStoreSeedMode === "clone" &&
-        preparedWorktree.documentStoreCloneBranch
-      ) {
-        clonedDocumentStoreVerification = toJsonValue(
-          await verifyContainerDocumentRepoPush({
-            repoRoot: documentStoreRoot,
-            remoteName: "origin",
-            branch: preparedWorktree.documentStoreCloneBranch,
-            expectedCommitSha: finalOutput.git.commitSha,
-            expectedBaseSha: documentStoreBaseCommitSha,
-            expectedCommitSubject
-          })
-        ) as JsonObject;
-      } else if (
-        env.promptRunnerExecutionMode !== "container" &&
-        terminalStatus === "completed" &&
-        preparedWorktree &&
-        worktreeBaseCommitSha
-      ) {
-        worktreeCommitVerification = toJsonValue(
-          await verifySinglePromptCommit({
-            repoRoot,
-            expectedBaseSha: worktreeBaseCommitSha,
-            expectedCommitSha: finalOutput.git.commitSha,
-            expectedCommitSubject,
-            headRef: preparedWorktree.promptBranch,
-            statusPathspecs: [preparedWorktree.documentStoreDir],
-            gitOperations
-          })
-        ) as JsonObject;
-      }
+      let auditTimingResult: JsonObject | null = null;
+      let finalGitResult: JsonObject | null = null;
 
       await transitionTo("updating_canvas", "Validating canvas files after Codex output.");
       postflightCanvasReport = await validateCanvasState({
@@ -1264,6 +1278,153 @@ export class PromptRunner {
 
       let auditSyncResult: JsonObject | null = null;
 
+      if (!finalOutput.audit.appended && terminalStatus === "completed") {
+        throw new Error("Codex reported a completed run without appending an audit section.");
+      }
+
+      if (terminalStatus === "completed") {
+        await transitionTo(
+          "committing",
+          "Appending queue and processing timing to audit.md and creating the final prompt commit."
+        );
+
+        const finalizedAt = new Date().toISOString();
+        auditTimingResult = toJsonValue(
+          await appendPromptTimingToAuditSection({
+            auditPath,
+            promptId: prompt.id,
+            createdAt: prompt.createdAt,
+            startedAt: prompt.startedAt,
+            finalizedAt
+          })
+        ) as JsonObject;
+
+        runnerMetadata.auditTiming = auditTimingResult;
+
+        if (env.promptRunnerExecutionMode === "container" && containerDocumentRepo) {
+          await assertHeadMatches({
+            repoRoot,
+            expectedHeadSha: documentStoreBaseCommitSha,
+            gitOperations
+          });
+
+          const commitResult = await createPromptCommit({
+            repoRoot,
+            commitSubject: expectedCommitSubject,
+            gitOperations
+          });
+
+          await transitionTo("pushing", "Pushing final prompt commit to the document-store remote.");
+          await pushPromptCommit({
+            repoRoot,
+            remoteName: containerDocumentRepo.remoteName,
+            branch: containerDocumentRepo.branch,
+            gitOperations
+          });
+
+          containerVerification = toJsonValue(
+            await verifyContainerDocumentRepoPush({
+              repoRoot,
+              remoteName: containerDocumentRepo.remoteName,
+              branch: containerDocumentRepo.branch,
+              expectedCommitSha: commitResult.commitSha,
+              expectedBaseSha: documentStoreBaseCommitSha,
+              expectedCommitSubject
+            })
+          ) as JsonObject;
+
+          finalGitResult = {
+            repoRoot,
+            remoteName: containerDocumentRepo.remoteName,
+            branch: containerDocumentRepo.branch,
+            commitSha: commitResult.commitSha,
+            commitSubject: commitResult.commitSubject,
+            commitCreated: true,
+            pushSucceeded: true
+          } satisfies JsonObject;
+        } else if (
+          preparedWorktree?.documentStoreSeedMode === "clone" &&
+          preparedWorktree.documentStoreCloneBranch
+        ) {
+          await assertHeadMatches({
+            repoRoot: documentStoreRoot,
+            expectedHeadSha: documentStoreBaseCommitSha,
+            gitOperations
+          });
+
+          const commitResult = await createPromptCommit({
+            repoRoot: documentStoreRoot,
+            commitSubject: expectedCommitSubject,
+            gitOperations
+          });
+
+          await transitionTo("pushing", "Pushing final prompt commit to the document-store remote.");
+          await pushPromptCommit({
+            repoRoot: documentStoreRoot,
+            remoteName: "origin",
+            branch: preparedWorktree.documentStoreCloneBranch,
+            gitOperations
+          });
+
+          clonedDocumentStoreVerification = toJsonValue(
+            await verifyContainerDocumentRepoPush({
+              repoRoot: documentStoreRoot,
+              remoteName: "origin",
+              branch: preparedWorktree.documentStoreCloneBranch,
+              expectedCommitSha: commitResult.commitSha,
+              expectedBaseSha: documentStoreBaseCommitSha,
+              expectedCommitSubject
+            })
+          ) as JsonObject;
+
+          finalGitResult = {
+            repoRoot: documentStoreRoot,
+            remoteName: "origin",
+            branch: preparedWorktree.documentStoreCloneBranch,
+            commitSha: commitResult.commitSha,
+            commitSubject: commitResult.commitSubject,
+            commitCreated: true,
+            pushSucceeded: true
+          } satisfies JsonObject;
+        } else if (preparedWorktree && worktreeBaseCommitSha) {
+          await assertHeadMatches({
+            repoRoot,
+            expectedHeadSha: worktreeBaseCommitSha,
+            headRef: preparedWorktree.promptBranch,
+            gitOperations
+          });
+
+          const commitResult = await createPromptCommit({
+            repoRoot,
+            commitSubject: expectedCommitSubject,
+            pathspecs: [preparedWorktree.documentStoreDir],
+            gitOperations
+          });
+
+          worktreeCommitVerification = toJsonValue(
+            await verifySinglePromptCommit({
+              repoRoot,
+              expectedBaseSha: worktreeBaseCommitSha,
+              expectedCommitSha: commitResult.commitSha,
+              expectedCommitSubject,
+              headRef: preparedWorktree.promptBranch,
+              statusPathspecs: [preparedWorktree.documentStoreDir],
+              gitOperations
+            })
+          ) as JsonObject;
+
+          finalGitResult = {
+            repoRoot,
+            remoteName: preparedWorktree.remoteName,
+            branch: preparedWorktree.promptBranch,
+            commitSha: commitResult.commitSha,
+            commitSubject: commitResult.commitSubject,
+            commitCreated: true,
+            pushSucceeded: preparedWorktree.remoteConfigured
+          } satisfies JsonObject;
+        }
+      }
+
       if (finalOutput.audit.appended) {
         await transitionTo(
           "syncing_audit",
@@ -1276,29 +1437,35 @@ export class PromptRunner {
           auditPath,
           scriptRepoRoot: controllerRepoRoot
         });
-      } else if (terminalStatus === "completed") {
-        throw new Error("Codex reported a completed run without appending an audit section.");
       }
 
       if (terminalStatus === "completed" && preparedWorktree) {
         await transitionTo(
-          "committing",
+          "pushing",
           preparedWorktree.outerAutomationRemoteSync
-            ? "Promoting the prompt branch onto the automation branch."
-            : "Cleaning prompt worktree after dedicated document-store commit."
+            ? "Promoting the final prompt commit onto the automation branch."
+            : "Cleaning prompt worktree after final document-store push.",
+          {
+            finalGit: finalGitResult || undefined
+          }
         );
         finalizedWorktree = toJsonValue(
           await finalizePromptWorktree(preparedWorktree)
         ) as JsonObject;
-        await transitionTo(
-          "pushing",
-          preparedWorktree.outerAutomationRemoteSync
-            ? "Automation branch pushed. Cleaning prompt worktree."
-            : "Dedicated document-store branch verified. Cleaning prompt worktree.",
-          {
-            finalizedWorktree
-          }
-        );
+
+        if (
+          preparedWorktree.outerAutomationRemoteSync &&
+          isJsonObject(finalGitResult) &&
+          typeof finalizedWorktree.automationBranch === "string" &&
+          typeof finalizedWorktree.automationCommitSha === "string"
+        ) {
+          finalGitResult = {
+            ...finalGitResult,
+            branch: finalizedWorktree.automationBranch,
+            commitSha: finalizedWorktree.automationCommitSha,
+            pushSucceeded: preparedWorktree.remoteConfigured
+          };
+        }
       }
 
       await updatePrompt(prompt.id, {
@@ -1308,10 +1475,13 @@ export class PromptRunner {
           runner: {
             ...runnerMetadata,
             finalOutputCapturedAt: new Date().toISOString(),
-            durationMs: Date.now() - promptStartedAt
+            durationMs: Date.now() - promptStartedAt,
+            auditTiming: auditTimingResult,
+            finalGit: finalGitResult
           },
           execution: {
             finalOutput,
+            finalGit: finalGitResult,
             outputPath: artifacts.outputPath,
             stdoutPath: artifacts.stdoutPath,
             stderrPath: artifacts.stderrPath

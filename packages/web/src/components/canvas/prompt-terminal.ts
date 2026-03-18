@@ -60,9 +60,9 @@ export const promptTerminalStatusMessages: Record<PromptStatus, string> = {
   writing: "running codex cli",
   updating_canvas: "validating obsidian canvas updates",
   auditing: "parsing codex output",
-  committing: "promoting prompt branch onto codex/mindmap",
-  pushing: "pushing codex/mindmap to origin",
-  syncing_audit: "syncing audit.md back into the prompt row",
+  committing: "appending audit timing and creating the final commit",
+  pushing: "pushing the finalized prompt result",
+  syncing_audit: "syncing finalized audit.md back into the prompt row",
   completed: "run complete",
   failed: "run failed"
 };
@@ -106,14 +106,23 @@ export const getPromptGitSummary = (prompt: PromptRecord) => {
   const runner = readRecord(prompt.metadata.runner);
   const execution = readRecord(prompt.metadata.execution);
   const finalOutput = readRecord(execution?.finalOutput);
-  const finalGit = readRecord(finalOutput?.git);
+  const runnerFinalGit = readRecord(execution?.finalGit) || readRecord(runner?.finalGit);
+  const codexGit = readRecord(finalOutput?.git);
   const branch = readString(audit?.branch) || readString(auditSync?.branch);
   const sha =
     readString(audit?.sha) ||
     readString(auditSync?.sha) ||
-    readString(finalGit?.commitSha);
+    readString(runnerFinalGit?.commitSha) ||
+    readString(codexGit?.commitSha);
 
-  return { branch: branch || readString(runner?.workingBranch), sha };
+  return {
+    branch:
+      branch ||
+      readString(runnerFinalGit?.branch) ||
+      readString(codexGit?.branch) ||
+      readString(runner?.workingBranch),
+    sha
+  };
 };
 
 export const getPromptRunnerGitContext = (prompt: PromptRecord): PromptRunnerGitContext => {
