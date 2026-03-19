@@ -5,10 +5,11 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --format cjs --target node20 --out-dir dist --clean",
+    "build": "tsup src/index.ts src/worker/index.ts --format cjs --target node20 --out-dir dist --clean",
     "start": "node dist/index.js",
     "migrate": "tsx src/index.ts --migrate-only",
     "test": "tsx --test src/**/*.test.ts",
+    "test:kube-worker": "node --import tsx --test src/services/kube-prompt-jobs.test.ts src/services/prompt-dispatcher.test.ts src/services/prompt-worker-observer.test.ts src/services/prompt-workspace-events.test.ts src/services/prompt-worker-metadata.test.ts src/worker/contract.test.ts src/worker/executor-runtime.test.ts",
     "test:battletest": "node --import tsx --test src/services/program-battletest/scenario-pack.test.ts src/services/program-battletest/harness.test.ts src/services/program-battletest/evaluator.test.ts src/services/program-battletest/suite.test.ts src/services/program-battletest/reporting.test.ts",
     "test:battletest-harness": "node --import tsx --test src/services/program-battletest/harness.test.ts",
     "test:battletest-evaluator": "node --import tsx --test src/services/program-battletest/evaluator.test.ts",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@apollo/server": "^4.10.0",
     "@graphql-tools/schema": "^10.0.25",
+    "@kubernetes/client-node": "^1.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",

@@ -79,6 +79,132 @@ export default {
       }
     },
     {
+      id: "server-kube-prompt-jobs",
+      label: "Kubernetes prompt jobs",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/services/kube-prompt-jobs.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
+      id: "server-prompt-dispatcher",
+      label: "Prompt dispatcher",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/services/prompt-dispatcher.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
+      id: "server-prompt-worker-observer",
+      label: "Prompt worker observer",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/services/prompt-worker-observer.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
+      id: "server-prompt-workspace-events",
+      label: "Prompt workspace events",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/services/prompt-workspace-events.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
+      id: "server-worker-contract",
+      label: "Worker contract",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/worker/contract.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
+      id: "server-worker-executor-runtime",
+      label: "Worker executor runtime",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/worker/executor-runtime.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
+      id: "server-worker-metadata",
+      label: "Worker metadata",
+      adapter: "node-test",
+      package: "server",
+      cwd: rootDir,
+      command: [
+        "node",
+        "--import",
+        "tsx",
+        "--test",
+        "packages/server/src/services/prompt-worker-metadata.test.ts"
+      ],
+      coverage: {
+        enabled: true,
+        mode: "same-run"
+      }
+    },
+    {
       id: "server-program-battletest-scenarios",
       label: "Program battletest scenarios",
       adapter: "node-test",

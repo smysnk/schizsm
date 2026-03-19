@@ -68,6 +68,39 @@ const migrations: Migration[] = [
       "CREATE INDEX IF NOT EXISTS prompts_status_idx ON prompts (status)",
       "CREATE INDEX IF NOT EXISTS prompts_created_at_idx ON prompts (created_at DESC)"
     ]
+  },
+  {
+    id: "20260319_000001_create_prompt_executions_table",
+    statements: [
+      `
+        CREATE TABLE IF NOT EXISTS prompt_executions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          prompt_id UUID NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+          attempt INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'dispatched',
+          execution_mode TEXT NOT NULL DEFAULT 'kube-worker',
+          job_name TEXT,
+          pod_name TEXT,
+          namespace TEXT,
+          image TEXT,
+          worker_node TEXT,
+          started_at TIMESTAMPTZ,
+          finished_at TIMESTAMPTZ,
+          exit_code INTEGER,
+          error_message TEXT,
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          CONSTRAINT prompt_executions_attempt_positive CHECK (attempt > 0),
+          CONSTRAINT prompt_executions_status_not_blank CHECK (btrim(status) <> ''),
+          CONSTRAINT prompt_executions_mode_not_blank CHECK (btrim(execution_mode) <> ''),
+          CONSTRAINT prompt_executions_prompt_attempt_unique UNIQUE (prompt_id, attempt)
+        )
+      `,
+      "CREATE INDEX IF NOT EXISTS prompt_executions_prompt_id_idx ON prompt_executions (prompt_id, attempt DESC)",
+      "CREATE INDEX IF NOT EXISTS prompt_executions_status_idx ON prompt_executions (status)",
+      "CREATE INDEX IF NOT EXISTS prompt_executions_namespace_job_idx ON prompt_executions (namespace, job_name)"
+    ]
   }
 ];
 

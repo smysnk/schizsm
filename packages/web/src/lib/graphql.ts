@@ -65,12 +65,33 @@ export type PromptRunnerStateRecord = {
   runnerSessionId: string;
 };
 
+export type PromptExecutionRecord = {
+  id: string;
+  promptId: string;
+  attempt: number;
+  status: string;
+  executionMode: string;
+  jobName: string | null;
+  podName: string | null;
+  namespace: string | null;
+  image: string | null;
+  workerNode: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+  errorMessage: string | null;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PromptRecord = {
   id: string;
   content: string;
   status: PromptStatus;
   metadata: Record<string, unknown>;
   audit: Record<string, unknown>;
+  promptExecutions: PromptExecutionRecord[];
   startedAt: string | null;
   finishedAt: string | null;
   errorMessage: string | null;
@@ -136,6 +157,38 @@ export const MOVE_IDEA_MUTATION = gql`
   }
 `;
 
+const promptFields = `
+  id
+  content
+  status
+  metadata
+  audit
+  promptExecutions {
+    id
+    promptId
+    attempt
+    status
+    executionMode
+    jobName
+    podName
+    namespace
+    image
+    workerNode
+    startedAt
+    finishedAt
+    exitCode
+    errorMessage
+    metadata
+    createdAt
+    updatedAt
+  }
+  startedAt
+  finishedAt
+  errorMessage
+  createdAt
+  updatedAt
+`;
+
 export const PROMPTS_QUERY = gql`
   query Prompts($limit: Int) {
     promptRunnerState {
@@ -149,16 +202,7 @@ export const PROMPTS_QUERY = gql`
       runnerSessionId
     }
     prompts(limit: $limit) {
-      id
-      content
-      status
-      metadata
-      audit
-      startedAt
-      finishedAt
-      errorMessage
-      createdAt
-      updatedAt
+      ${promptFields}
     }
   }
 `;
@@ -180,32 +224,10 @@ export const PROMPT_WORKSPACE_SUBSCRIPTION = gql`
         runnerSessionId
       }
       prompts {
-        id
-        content
-        status
-        metadata
-        audit
-        startedAt
-        finishedAt
-        errorMessage
-        createdAt
-        updatedAt
+        ${promptFields}
       }
     }
   }
-`;
-
-const promptFields = `
-  id
-  content
-  status
-  metadata
-  audit
-  startedAt
-  finishedAt
-  errorMessage
-  createdAt
-  updatedAt
 `;
 
 export const CREATE_PROMPT_MUTATION = gql`

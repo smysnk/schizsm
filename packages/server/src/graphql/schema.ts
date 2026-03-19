@@ -62,9 +62,30 @@ export const typeDefs = `#graphql
     status: PromptStatus!
     metadata: JSON!
     audit: JSON!
+    promptExecutions: [PromptExecution!]!
     startedAt: String
     finishedAt: String
     errorMessage: String
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type PromptExecution {
+    id: ID!
+    promptId: ID!
+    attempt: Int!
+    status: String!
+    executionMode: String!
+    jobName: String
+    podName: String
+    namespace: String
+    image: String
+    workerNode: String
+    startedAt: String
+    finishedAt: String
+    exitCode: Int
+    errorMessage: String
+    metadata: JSON!
     createdAt: String!
     updatedAt: String!
   }

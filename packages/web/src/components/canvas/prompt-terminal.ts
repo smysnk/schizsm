@@ -1,4 +1,8 @@
-import type { PromptRecord, PromptStatus } from "../../lib/graphql";
+import type {
+  PromptExecutionRecord,
+  PromptRecord,
+  PromptStatus
+} from "../../lib/graphql";
 
 export type PromptTransitionRecord = {
   status: string;
@@ -39,6 +43,18 @@ export type PromptRunnerGitContext = {
   branch: string | null;
   remoteName: string | null;
   operations: PromptRunnerGitOperation[];
+};
+
+export type PromptWorkerContext = {
+  attempt: number | null;
+  phase: string | null;
+  jobName: string | null;
+  podName: string | null;
+  namespace: string | null;
+  workerNode: string | null;
+  logTail: string | null;
+  latestExecution: PromptExecutionRecord | null;
+  attempts: PromptExecutionRecord[];
 };
 
 export const terminalWorkingStatuses = new Set<PromptStatus>([
@@ -162,6 +178,49 @@ export const getPromptRunnerGitContext = (prompt: PromptRecord): PromptRunnerGit
   };
 };
 
+export const getPromptExecutionAttempts = (prompt: PromptRecord): PromptExecutionRecord[] =>
+  [...(prompt.promptExecutions || [])].sort((left, right) => right.attempt - left.attempt);
+
+export const getPromptWorkerContext = (prompt: PromptRecord): PromptWorkerContext => {
+  const worker = readRecord(prompt.metadata.worker);
+  const logsPreview = readRecord(worker?.logsPreview);
+  const attempts = getPromptExecutionAttempts(prompt);
+  const latestExecution = attempts[0] || null;
+  const allowExecutionFallback = prompt.status !== "queued";
+  const observerMetadata = latestExecution ? readRecord(latestExecution.metadata.observer) : null;
+
+  return {
+    attempt:
+      (typeof worker?.attempt === "number" ? worker.attempt : null) ||
+      (allowExecutionFallback ? latestExecution?.attempt : null) ||
+      null,
+    phase:
+      readString(worker?.phase) ||
+      (allowExecutionFallback ? latestExecution?.status : null) ||
+      null,
+    jobName:
+      readString(worker?.jobName) ||
+      (allowExecutionFallback ? latestExecution?.jobName : null) ||
+      null,
+    podName:
+      readString(worker?.podName) ||
+      (allowExecutionFallback ? latestExecution?.podName : null) ||
+      null,
+    namespace:
+      readString(worker?.namespace) ||
+      (allowExecutionFallback ? latestExecution?.namespace : null) ||
+      null,
+    workerNode: allowExecutionFallback ? latestExecution?.workerNode || null : null,
+    logTail:
+      readString(logsPreview?.stdout) ||
+      readString(logsPreview?.stderr) ||
+      (allowExecutionFallback ? readString(observerMetadata?.executorLogTail) : null) ||
+      null,
+    latestExecution,
+    attempts
+  };
+};
+
 export const buildPromptTerminalEntries = (prompt: PromptRecord | null): PromptTerminalEntry[] => {
   const entries: PromptTerminalEntry[] = [
     {
@@ -200,6 +259,7 @@ export const buildPromptTerminalEntries = (prompt: PromptRecord | null): PromptT
   }
 
   const runnerGit = getPromptRunnerGitContext(prompt);
+  const worker = getPromptWorkerContext(prompt);
 
   if (runnerGit.repository) {
     entries.push({
@@ -219,6 +279,33 @@ export const buildPromptTerminalEntries = (prompt: PromptRecord | null): PromptT
     });
   }
 
+  if (worker.attempt) {
+    entries.push({
+      id: "worker-attempt",
+      text: `# worker attempt: ${worker.attempt}`,
+      tone: "system",
+      kind: "status"
+    });
+  }
+
+  if (worker.jobName) {
+    entries.push({
+      id: "worker-job",
+      text: `# job: ${worker.jobName}`,
+      tone: "system",
+      kind: "status"
+    });
+  }
+
+  if (worker.podName) {
+    entries.push({
+      id: "worker-pod",
+      text: `# pod: ${worker.namespace ? `${worker.namespace}/` : ""}${worker.podName}`,
+      tone: "system",
+      kind: "status"
+    });
+  }
+
   for (const [index, operation] of runnerGit.operations.entries()) {
     entries.push({
       id: `git-op-${index}`,
@@ -226,6 +313,17 @@ export const buildPromptTerminalEntries = (prompt: PromptRecord | null): PromptT
       tone: "system",
       kind: "git"
     });
+  }
+
+  if (worker.logTail) {
+    for (const [index, line] of worker.logTail.split(/\r?\n/).filter(Boolean).slice(-3).entries()) {
+      entries.push({
+        id: `worker-log-${index}`,
+        text: `# pod log: ${line}`,
+        tone: "system",
+        kind: "status"
+      });
+    }
   }
 
   for (const transition of getPromptTransitions(prompt)) {

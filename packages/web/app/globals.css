@@ -1226,6 +1226,24 @@ a {
   color: var(--text);
 }
 
+.prompt-detail__log {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.prompt-detail__log-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", monospace;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
 .prompt-detail__actions {
   display: flex;
   gap: 10px;

@@ -410,7 +410,10 @@ export const retryPrompt = async (id: string): Promise<Prompt> => {
       failure: null,
       execution: null,
       auditSync: null,
-      worktree: null
+      worktree: null,
+      worker: null,
+      containerRepo: null,
+      runner: null
     }
   });
 };

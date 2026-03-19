@@ -31,6 +31,18 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-api" (include "schizm.fullname" .) -}}
 {{- end -}}
 
+{{- define "schizm.apiDispatcherServiceAccountName" -}}
+{{- if .Values.api.dispatcher.serviceAccount.name -}}
+{{- .Values.api.dispatcher.serviceAccount.name -}}
+{{- else -}}
+{{- printf "%s-dispatcher" (include "schizm.apiName" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "schizm.apiDispatcherRoleName" -}}
+{{- printf "%s-dispatcher" (include "schizm.apiName" .) -}}
+{{- end -}}
+
 {{- define "schizm.webName" -}}
 {{- printf "%s-web" (include "schizm.fullname" .) -}}
 {{- end -}}
@@ -69,6 +81,50 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- else -}}
 {{- printf "%s-secret" (include "schizm.webName" .) -}}
 {{- end -}}
+{{- end -}}
+
+{{- define "schizm.workerNamespace" -}}
+{{- if .Values.worker.namespace -}}
+{{- .Values.worker.namespace -}}
+{{- else -}}
+{{- .Release.Namespace -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "schizm.workerRuntimeSecretName" -}}
+{{- if .Values.worker.runtimeSecretName -}}
+{{- .Values.worker.runtimeSecretName -}}
+{{- else -}}
+{{- include "schizm.apiSecretName" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "schizm.workerExecutorImage" -}}
+{{- if .Values.worker.executorImage -}}
+{{- .Values.worker.executorImage -}}
+{{- else -}}
+{{- include "schizm.image" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "schizm.workerGitHelperImage" -}}
+{{- if .Values.worker.gitHelperImage -}}
+{{- .Values.worker.gitHelperImage -}}
+{{- else -}}
+{{- include "schizm.workerExecutorImage" . -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "schizm.workerImagePullPolicy" -}}
+{{- if .Values.worker.imagePullPolicy -}}
+{{- .Values.worker.imagePullPolicy -}}
+{{- else -}}
+{{- .Values.image.pullPolicy -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "schizm.workerNetworkPolicyName" -}}
+{{- printf "%s-worker-egress" (include "schizm.fullname" .) -}}
 {{- end -}}
 
 {{- define "schizm.publicScheme" -}}

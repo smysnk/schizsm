@@ -16,6 +16,7 @@ const createPromptRecord = (
   status: "queued",
   metadata: {},
   audit: {},
+  promptExecutions: [],
   startedAt: null,
   finishedAt: null,
   errorMessage: null,
@@ -119,6 +120,55 @@ test("buildPromptTerminalEntries includes runner git context and operations when
         entry.text === "# git op: git checkout -B codex/mindmap origin/codex/mindmap"
     )
   );
+});
+
+test("buildPromptTerminalEntries includes worker job context and pod log tail", () => {
+  const prompt = createPromptRecord({
+    status: "writing",
+    metadata: {
+      worker: {
+        attempt: 2,
+        phase: "running",
+        jobName: "schizm-prompt-abc-2",
+        podName: "schizm-prompt-abc-2-f5k9m",
+        namespace: "schizm",
+        logsPreview: {
+          stdout: "syncing repo\nrunning codex cli"
+        }
+      }
+    },
+    promptExecutions: [
+      {
+        id: "execution-2",
+        promptId: "prompt-123",
+        attempt: 2,
+        status: "running",
+        executionMode: "kube-worker",
+        jobName: "schizm-prompt-abc-2",
+        podName: "schizm-prompt-abc-2-f5k9m",
+        namespace: "schizm",
+        image: "executor:latest",
+        workerNode: "node-a",
+        startedAt: "2026-03-17T00:00:00.000Z",
+        finishedAt: null,
+        exitCode: null,
+        errorMessage: null,
+        metadata: {},
+        createdAt: "2026-03-17T00:00:00.000Z",
+        updatedAt: "2026-03-17T00:00:10.000Z"
+      }
+    ]
+  });
+
+  const entries = buildPromptTerminalEntries(prompt);
+
+  assert.ok(entries.some((entry) => entry.text === "# worker attempt: 2"));
+  assert.ok(entries.some((entry) => entry.text === "# job: schizm-prompt-abc-2"));
+  assert.ok(
+    entries.some((entry) => entry.text === "# pod: schizm/schizm-prompt-abc-2-f5k9m")
+  );
+  assert.ok(entries.some((entry) => entry.text === "# pod log: syncing repo"));
+  assert.ok(entries.some((entry) => entry.text === "# pod log: running codex cli"));
 });
 
 test("buildPromptTerminalWorkingEntry shows an active working line only for in-flight statuses", () => {

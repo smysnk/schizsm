@@ -61,9 +61,11 @@ The root `dev` script runs through [mono-helper.yml](mono-helper.yml), and the r
 
 ## Container Runner Mode
 
-The production container can also run the prompt runner directly against a cloned document-store repository.
+The image still supports an explicit legacy in-process container runner for local debugging, but normal production deployment is now worker-only.
 
-When `PROMPT_RUNNER_EXECUTION_MODE=container` is enabled for the API container:
+The standard `api` entrypoint is now dispatch-only and expects `PROMPT_RUNNER_EXECUTION_MODE=kube-worker` in production. If you intentionally need the old in-process container flow for local debugging, launch `api-inprocess` explicitly instead.
+
+When `PROMPT_RUNNER_EXECUTION_MODE=container` is enabled for the legacy `api-inprocess` container path:
 
 - Codex CLI is installed as part of the image build
 - startup can restore `~/.codex/auth.json` from `CODEX_AUTH_JSON_BASE64`, or log Codex in with `OPENAI_API_KEY`
@@ -71,7 +73,7 @@ When `PROMPT_RUNNER_EXECUTION_MODE=container` is enabled for the API container:
 - startup clones or fast-forwards `DOCUMENT_STORE_GIT_URL` + `DOCUMENT_STORE_GIT_BRANCH` into `DOCUMENT_STORE_DIR`
 - prompt runs execute Codex directly inside that cloned document-store repo, then require a commit and push to succeed
 
-This mode is meant for deployments where the writable knowledge base lives in its own Git repository instead of inside the app repo.
+This mode is meant for local or break-glass scenarios where the writable knowledge base lives in its own Git repository instead of inside the app repo. The normal production path is Kubernetes worker Jobs.
 
 ## Testing
 

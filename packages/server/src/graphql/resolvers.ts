@@ -7,6 +7,7 @@ import {
   listPrompts,
   retryPrompt
 } from "../repositories/prompt-repository";
+import { listPromptExecutions } from "../repositories/prompt-execution-repository";
 import { getPromptRunner } from "../services/prompt-runner-registry";
 import { subscribePromptWorkspaceEvents } from "../services/prompt-workspace-events";
 import { jsonScalar } from "./json-scalar";
@@ -25,6 +26,9 @@ const getPromptRunnerState = () =>
 
 export const resolvers = {
   JSON: jsonScalar,
+  Prompt: {
+    promptExecutions: async (prompt: { id: string }) => listPromptExecutions(prompt.id)
+  },
   Query: {
     health: () => "ok",
     runtimeConfig: () => getRuntimeConfig(),

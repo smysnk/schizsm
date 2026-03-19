@@ -24,6 +24,36 @@
 {{- if or (not (hasKey $config "PROMPT_RUNNER_ENABLED")) (eq (printf "%v" (index $config "PROMPT_RUNNER_ENABLED")) "") }}
 {{- $_ := set $config "PROMPT_RUNNER_ENABLED" "false" -}}
 {{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_EXECUTION_MODE")) (eq (printf "%v" (index $config "PROMPT_RUNNER_EXECUTION_MODE")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_EXECUTION_MODE" "kube-worker" -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_NAMESPACE")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_NAMESPACE")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_NAMESPACE" (include "schizm.workerNamespace" . | trim) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_RUNTIME_SECRET_NAME")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_RUNTIME_SECRET_NAME")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_RUNTIME_SECRET_NAME" (include "schizm.workerRuntimeSecretName" . | trim) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_EXECUTOR_IMAGE")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_EXECUTOR_IMAGE")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_EXECUTOR_IMAGE" (include "schizm.workerExecutorImage" . | trim) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_GIT_HELPER_IMAGE")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_GIT_HELPER_IMAGE")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_GIT_HELPER_IMAGE" (include "schizm.workerGitHelperImage" . | trim) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_IMAGE_PULL_POLICY")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_IMAGE_PULL_POLICY")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_IMAGE_PULL_POLICY" (include "schizm.workerImagePullPolicy" . | trim) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_JOB_TTL_SECONDS")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_JOB_TTL_SECONDS")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_JOB_TTL_SECONDS" (printf "%v" .Values.worker.jobTtlSeconds) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_BACKOFF_LIMIT")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_BACKOFF_LIMIT")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_BACKOFF_LIMIT" (printf "%v" .Values.worker.backoffLimit) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_WORKSPACE_DIR")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_WORKSPACE_DIR")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_WORKSPACE_DIR" (printf "%v" .Values.worker.workspaceDir) -}}
+{{- end }}
+{{- if or (not (hasKey $config "PROMPT_RUNNER_KUBE_RUNTIME_LAYOUT")) (eq (printf "%v" (index $config "PROMPT_RUNNER_KUBE_RUNTIME_LAYOUT")) "") }}
+{{- $_ := set $config "PROMPT_RUNNER_KUBE_RUNTIME_LAYOUT" (printf "%v" .Values.worker.runtimeLayout) -}}
+{{- end }}
 {{- if or (not (hasKey $config "SEED_DEMO_GRAPH")) (eq (printf "%v" (index $config "SEED_DEMO_GRAPH")) "") }}
 {{- $_ := set $config "SEED_DEMO_GRAPH" "false" -}}
 {{- end }}

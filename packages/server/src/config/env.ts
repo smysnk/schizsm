@@ -97,7 +97,9 @@ export const env = {
   promptRunnerExecutionMode:
     process.env.PROMPT_RUNNER_EXECUTION_MODE === "container"
       ? "container"
-      : "worktree",
+      : process.env.PROMPT_RUNNER_EXECUTION_MODE === "kube-worker"
+        ? "kube-worker"
+        : "worktree",
   promptRunnerPollMs: parseNumber(process.env.PROMPT_RUNNER_POLL_MS, 5_000),
   promptRunnerCodexBin: process.env.CODEX_BIN || "codex",
   promptRunnerRepoRoot: resolveRepoRoot(),
@@ -118,8 +120,51 @@ export const env = {
   promptRunnerWorktreeRoot:
     process.env.PROMPT_RUNNER_WORKTREE_ROOT ||
     path.join(resolveRepoRoot(), ".codex-workdirs"),
+  promptRunnerKubeNamespace: process.env.PROMPT_RUNNER_KUBE_NAMESPACE || "schizm",
+  promptRunnerKubeRuntimeSecretName:
+    process.env.PROMPT_RUNNER_KUBE_RUNTIME_SECRET_NAME || "schizm-runtime-secret",
+  promptRunnerKubeExecutorImage:
+    process.env.PROMPT_RUNNER_KUBE_EXECUTOR_IMAGE || process.env.SCHIZM_IMAGE || "",
+  promptRunnerKubeGitHelperImage:
+    process.env.PROMPT_RUNNER_KUBE_GIT_HELPER_IMAGE ||
+    process.env.SCHIZM_IMAGE ||
+    process.env.PROMPT_RUNNER_KUBE_EXECUTOR_IMAGE ||
+    "",
+  promptRunnerKubeImagePullPolicy:
+    process.env.PROMPT_RUNNER_KUBE_IMAGE_PULL_POLICY || "Always",
+  promptRunnerKubeJobTtlSeconds: parseNumber(
+    process.env.PROMPT_RUNNER_KUBE_JOB_TTL_SECONDS,
+    900
+  ),
+  promptRunnerKubeBackoffLimit: parseNumber(
+    process.env.PROMPT_RUNNER_KUBE_BACKOFF_LIMIT,
+    0
+  ),
+  promptRunnerKubeWorkspaceDir:
+    process.env.PROMPT_RUNNER_KUBE_WORKSPACE_DIR || "/workspace/document-store",
+  promptRunnerKubeRuntimeDir:
+    process.env.PROMPT_RUNTIME_DIR || process.env.PROMPT_RUNNER_KUBE_RUNTIME_DIR || "/run/schizm",
+  promptRunnerKubeRuntimeLayout:
+    process.env.PROMPT_RUNNER_KUBE_RUNTIME_LAYOUT === "isolated"
+      ? "isolated"
+      : "single-container",
+  promptRunnerAllowInProcessProduction: parseBoolean(
+    process.env.PROMPT_RUNNER_ALLOW_IN_PROCESS_PRODUCTION,
+    false
+  ),
   nodeEnv: process.env.NODE_ENV || "development"
 };
+
+if (
+  env.nodeEnv === "production" &&
+  env.promptRunnerEnabled &&
+  env.promptRunnerExecutionMode !== "kube-worker" &&
+  !env.promptRunnerAllowInProcessProduction
+) {
+  throw new Error(
+    "Production prompt execution must use PROMPT_RUNNER_EXECUTION_MODE=kube-worker. Set PROMPT_RUNNER_ALLOW_IN_PROCESS_PRODUCTION=true only for temporary break-glass debugging."
+  );
+}
 
 export const resolveDocumentStoreRoot = (repoRoot: string) =>
   path.isAbsolute(env.documentStoreDir)

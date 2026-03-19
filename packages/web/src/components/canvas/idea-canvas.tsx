@@ -43,10 +43,12 @@ import {
   buildPromptTerminalEntries,
   buildPromptTerminalWorkingEntry,
   getNextTypedTerminalEntries,
+  getPromptExecutionAttempts,
   getPromptFailureDetails,
   getPromptGitSummary,
   getPromptRunnerGitContext,
   getPromptTransitions,
+  getPromptWorkerContext,
   terminalWorkingStatuses,
   type PromptTerminalEntry
 } from "./prompt-terminal";
@@ -386,6 +388,10 @@ export function IdeaCanvas() {
   const selectedPromptRecovery = selectedPrompt ? getPromptRecoveryNote(selectedPrompt) : null;
   const selectedPromptGit = selectedPrompt ? getPromptGitSummary(selectedPrompt) : null;
   const selectedPromptRunnerGit = selectedPrompt ? getPromptRunnerGitContext(selectedPrompt) : null;
+  const selectedPromptWorker = selectedPrompt ? getPromptWorkerContext(selectedPrompt) : null;
+  const selectedPromptExecutions = selectedPrompt
+    ? getPromptExecutionAttempts(selectedPrompt)
+    : [];
   const latestSelectedTransition = selectedPrompt ? getLatestPromptTransition(selectedPrompt) : null;
   const promptTerminalPrompt = promptTerminalSession
     ? recentPrompts.find((prompt) => prompt.id === promptTerminalSession.promptId) || null
@@ -1072,6 +1078,55 @@ export function IdeaCanvas() {
                           </div>
                         ) : null}
 
+                        {selectedPromptWorker &&
+                        (selectedPromptWorker.jobName ||
+                          selectedPromptWorker.podName ||
+                          selectedPromptWorker.workerNode ||
+                          selectedPromptWorker.attempt) ? (
+                          <div className="prompt-detail__runner">
+                            {selectedPromptWorker.attempt ? (
+                              <p className="prompt-detail__hint">
+                                Worker attempt: {selectedPromptWorker.attempt}
+                              </p>
+                            ) : null}
+                            {selectedPromptWorker.jobName ? (
+                              <p className="prompt-detail__hint">
+                                Worker job: {selectedPromptWorker.jobName}
+                              </p>
+                            ) : null}
+                            {selectedPromptWorker.podName ? (
+                              <p className="prompt-detail__hint">
+                                Worker pod:{" "}
+                                {selectedPromptWorker.namespace
+                                  ? `${selectedPromptWorker.namespace}/`
+                                  : ""}
+                                {selectedPromptWorker.podName}
+                              </p>
+                            ) : null}
+                            {selectedPromptWorker.workerNode ? (
+                              <p className="prompt-detail__hint">
+                                Worker node: {selectedPromptWorker.workerNode}
+                              </p>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        {selectedPromptWorker?.logTail ? (
+                          <div className="prompt-detail__log">
+                            <div className="prompt-detail__step-row">
+                              <span className="stat-card__label">Recent pod logs</span>
+                              <span className="prompt-item__time">
+                                {selectedPromptWorker.latestExecution?.updatedAt
+                                  ? formatPromptTime(selectedPromptWorker.latestExecution.updatedAt)
+                                  : "Observed"}
+                              </span>
+                            </div>
+                            <pre className="prompt-detail__log-text">
+                              {selectedPromptWorker.logTail}
+                            </pre>
+                          </div>
+                        ) : null}
+
                         {selectedPromptRunnerGit?.operations.length ? (
                           <div className="prompt-detail__timeline">
                             {selectedPromptRunnerGit.operations.map((operation, index) => (
@@ -1091,6 +1146,60 @@ export function IdeaCanvas() {
                                   </p>
                                 ) : null}
                                 <p className="prompt-detail__git-command">{operation.command}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {selectedPromptExecutions.length ? (
+                          <div className="prompt-detail__timeline">
+                            {selectedPromptExecutions.map((execution) => (
+                              <div
+                                className="prompt-detail__step"
+                                key={execution.id}
+                              >
+                                <div className="prompt-detail__step-row">
+                                  <span className="stat-card__label">
+                                    Attempt {execution.attempt}
+                                  </span>
+                                  <span className="prompt-item__time">
+                                    {execution.startedAt
+                                      ? formatPromptTime(execution.startedAt)
+                                      : formatPromptTime(execution.createdAt)}
+                                  </span>
+                                </div>
+                                <p className="prompt-detail__hint">
+                                  Status: {execution.status}
+                                  {execution.executionMode
+                                    ? ` · mode ${execution.executionMode}`
+                                    : ""}
+                                </p>
+                                {execution.jobName ? (
+                                  <p className="prompt-detail__hint">
+                                    Job: {execution.jobName}
+                                  </p>
+                                ) : null}
+                                {execution.podName ? (
+                                  <p className="prompt-detail__hint">
+                                    Pod: {execution.namespace ? `${execution.namespace}/` : ""}
+                                    {execution.podName}
+                                  </p>
+                                ) : null}
+                                {execution.workerNode ? (
+                                  <p className="prompt-detail__hint">
+                                    Node: {execution.workerNode}
+                                  </p>
+                                ) : null}
+                                {execution.exitCode !== null ? (
+                                  <p className="prompt-detail__hint">
+                                    Exit code: {execution.exitCode}
+                                  </p>
+                                ) : null}
+                                {execution.errorMessage ? (
+                                  <p className="prompt-detail__reason">
+                                    {execution.errorMessage}
+                                  </p>
+                                ) : null}
                               </div>
                             ))}
                           </div>

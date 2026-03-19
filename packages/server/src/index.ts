@@ -15,6 +15,10 @@ import { typeDefs } from "./graphql/schema";
 import { ensureDemoGraph } from "./repositories/graph-repository";
 import { PromptRunner } from "./services/prompt-runner";
 import { setPromptRunner } from "./services/prompt-runner-registry";
+import {
+  initializePromptWorkspaceEventListener,
+  shutdownPromptWorkspaceEventListener
+} from "./services/prompt-workspace-events";
 
 const bootstrap = async () => {
   await runMigrations();
@@ -28,6 +32,7 @@ const startServer = async () => {
   try {
     await pool.query("SELECT 1");
     await bootstrap();
+    await initializePromptWorkspaceEventListener();
   } catch (error) {
     console.error("Failed to initialize server", error);
     process.exit(1);
@@ -35,6 +40,7 @@ const startServer = async () => {
 
   if (process.argv.includes("--migrate-only")) {
     console.log("Migrations completed.");
+    await shutdownPromptWorkspaceEventListener().catch(() => undefined);
     await pool.end();
     return;
   }
@@ -97,8 +103,18 @@ const startServer = async () => {
     void promptRunner.start();
   });
 
-  process.once("SIGINT", () => promptRunner.stop());
-  process.once("SIGTERM", () => promptRunner.stop());
+  const shutdown = async () => {
+    promptRunner.stop();
+    await shutdownPromptWorkspaceEventListener().catch(() => undefined);
+    await pool.end().catch(() => undefined);
+  };
+
+  process.once("SIGINT", () => {
+    void shutdown();
+  });
+  process.once("SIGTERM", () => {
+    void shutdown();
+  });
 };
 
 void startServer();

@@ -1,0 +1,37 @@
+{{- if .Values.api.dispatcher.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "schizm.apiDispatcherRoleName" . }}
+  namespace: {{ include "schizm.workerNamespace" . }}
+  labels:
+    {{- include "schizm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "schizm.apiDispatcherRoleName" . }}
+  namespace: {{ include "schizm.workerNamespace" . }}
+  labels:
+    {{- include "schizm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "schizm.apiDispatcherServiceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "schizm.apiDispatcherRoleName" . }}
+{{- end }}

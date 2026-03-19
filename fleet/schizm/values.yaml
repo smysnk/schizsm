@@ -12,6 +12,13 @@ api:
   replicaCount: 1
   args:
     - api
+  dispatcher:
+    serviceAccount:
+      create: true
+      name: ""
+      annotations: {}
+    rbac:
+      create: true
   existingConfigMap: ""
   existingSecret: "schizm-runtime-secret"
   service:
@@ -31,7 +38,8 @@ api:
     GRAPHQL_ENDPOINT: "/graphql"
     GRAPHQL_WS_URL: "wss://schizm.smysnk.com/graphql"
     DOCUMENT_STORE_DIR: "obsidian-repository"
-    PROMPT_RUNNER_ENABLED: "false"
+    PROMPT_RUNNER_ENABLED: "true"
+    PROMPT_RUNNER_EXECUTION_MODE: "kube-worker"
     SEED_DEMO_GRAPH: "false"
   secret: {}
   podAnnotations: {}
@@ -39,6 +47,20 @@ api:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+worker:
+  namespace: ""
+  runtimeSecretName: ""
+  executorImage: ""
+  gitHelperImage: ""
+  imagePullPolicy: ""
+  runtimeLayout: "single-container"
+  jobTtlSeconds: 900
+  backoffLimit: 0
+  workspaceDir: "/workspace/document-store"
+  networkPolicy:
+    enabled: false
+    extraEgress: []
 
 web:
   replicaCount: 1

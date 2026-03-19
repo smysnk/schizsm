@@ -13,13 +13,16 @@ const tsxBin = path.join(repoRoot, "node_modules", ".bin", "tsx");
 
 const inspectEnvValue = async ({
   cwd,
-  explicitUrl
+  explicitUrl,
+  extraEnv
 }: {
   cwd: string;
   explicitUrl?: string;
+  extraEnv?: Record<string, string | undefined>;
 }) => {
   const env = {
-    ...process.env
+    ...process.env,
+    ...extraEnv
   };
 
   if (explicitUrl !== undefined) {
@@ -42,6 +45,34 @@ const inspectEnvValue = async ({
   );
 
   return JSON.parse(stdout) as { repoUrl: string };
+};
+
+const importEnvModule = async ({
+  cwd,
+  extraEnv
+}: {
+  cwd: string;
+  extraEnv?: Record<string, string | undefined>;
+}) => {
+  const env = {
+    ...process.env,
+    ...extraEnv
+  };
+
+  const { stdout } = await execFileAsync(
+    tsxBin,
+    [
+      "-e",
+      `const mod = require(${JSON.stringify(envModulePath)}); console.log(JSON.stringify({ executionMode: mod.env.promptRunnerExecutionMode, enabled: mod.env.promptRunnerEnabled }));`
+    ],
+    {
+      cwd,
+      env,
+      encoding: "utf8"
+    }
+  );
+
+  return JSON.parse(stdout) as { executionMode: string; enabled: boolean };
 };
 
 test("explicit process env overrides dotenv files for DOCUMENT_STORE_GIT_URL", async () => {
@@ -96,6 +127,61 @@ test("package-local dotenv overrides repo-root dotenv when no explicit env is pr
     });
 
     assert.equal(inspected.repoUrl, "git@github.com:example/local.git");
+  } finally {
+    await rm(rootDirectory, { recursive: true, force: true });
+  }
+});
+
+test("production server config rejects in-process prompt execution by default", async () => {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "schizm-env-production-guard-"));
+  const workspaceRoot = path.join(rootDirectory, "workspace");
+  const serverCwd = path.join(workspaceRoot, "packages", "server");
+
+  try {
+    await mkdir(serverCwd, { recursive: true });
+
+    await assert.rejects(
+      () =>
+        execFileAsync(
+          tsxBin,
+          ["-e", `require(${JSON.stringify(envModulePath)});`],
+          {
+            cwd: serverCwd,
+            env: {
+              ...process.env,
+              NODE_ENV: "production",
+              PROMPT_RUNNER_ENABLED: "true",
+              PROMPT_RUNNER_EXECUTION_MODE: "container"
+            },
+            encoding: "utf8"
+          }
+        ),
+      /PROMPT_RUNNER_EXECUTION_MODE=kube-worker/
+    );
+  } finally {
+    await rm(rootDirectory, { recursive: true, force: true });
+  }
+});
+
+test("production server config allows kube-worker prompt execution", async () => {
+  const rootDirectory = await mkdtemp(path.join(os.tmpdir(), "schizm-env-production-kube-"));
+  const workspaceRoot = path.join(rootDirectory, "workspace");
+  const serverCwd = path.join(workspaceRoot, "packages", "server");
+
+  try {
+    await mkdir(serverCwd, { recursive: true });
+
+    const inspected = await importEnvModule({
+      cwd: serverCwd,
+      extraEnv: {
+        NODE_ENV: "production",
+        PROMPT_RUNNER_ENABLED: "true",
+        PROMPT_RUNNER_EXECUTION_MODE: "kube-worker"
+      }
+    });
+
+    assert.equal(inspected.executionMode, "kube-worker");
+    assert.equal(inspected.enabled, true);
   } finally {
     await rm(rootDirectory, { recursive: true, force: true });
   }

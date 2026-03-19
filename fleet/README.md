@@ -38,7 +38,41 @@ yarn fleet:env-secret --env-file ./.env.fleet --create-namespace
 ```
 
 The runtime secret is where production-only values such as `DATABASE_URL`
-and `DB_SSL` should live.
+and `DB_SSL` should live. The same secret is also mounted into prompt worker
+Jobs, so it must contain the document-store Git settings plus Codex auth.
+
+## Prompt Workers
+
+Phase 4 of the kube-worker rollout is wired into the chart:
+
+- the API deployment now runs with a dedicated dispatcher service account
+- namespace-scoped RBAC allows that API pod to create/delete Jobs and read pod logs
+- the API config map defaults prompt execution to `kube-worker`
+- worker image, secret, namespace, TTL, backoff, and layout are configurable in
+  `fleet/schizm/values.yaml`
+
+Phase 6 completes the production split:
+
+- the normal API container startup path is dispatcher-only
+- production config is expected to keep `PROMPT_RUNNER_EXECUTION_MODE=kube-worker`
+- in-process execution is now considered legacy/debug-only and requires an explicit override
+
+The default worker runtime still uses the same application image in
+single-container mode. The later isolated executor/bootstrap/publisher split is
+kept behind `worker.runtimeLayout`.
+
+## Worker Network Policy
+
+`worker.networkPolicy.enabled` is available in `fleet/schizm/values.yaml`, but
+it is off by default because every cluster has different egress requirements for:
+
+- Postgres
+- Git remotes
+- Codex/OpenAI endpoints
+- DNS
+
+When you enable it, add the required egress rules under
+`worker.networkPolicy.extraEgress`.
 
 ## GitRepo SSH Secret
 

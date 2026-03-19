@@ -1,0 +1,32 @@
+{{- if .Values.worker.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "schizm.workerNetworkPolicyName" . }}
+  namespace: {{ include "schizm.workerNamespace" . }}
+  labels:
+    {{- include "schizm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prompt-worker
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "schizm.name" . }}
+      app.kubernetes.io/component: prompt-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- with .Values.worker.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}
