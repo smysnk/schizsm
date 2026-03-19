@@ -88,6 +88,7 @@ ${prompt.content}
 Run requirements:
 - Update markdown and canvas files according to the contract in program.md.
 - Append exactly one audit section to ${auditPath} using the required markers for prompt ${prompt.id} if the run reaches a coherent stopping point.
+- If you update canvas files, expect the runner to optionally run a configured canvas rearranging command before the final audit write and commit.
 - Do not commit or push changes yourself. The runner will append timing details to the audit entry, then create the single final commit and push.
 - Do not create intermediate commits for markdown changes, canvas updates, audit updates, or any other partial step.
 - Use this exact final commit subject: ${JSON.stringify(expectedCommitSubject)}

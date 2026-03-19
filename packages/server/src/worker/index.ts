@@ -63,6 +63,9 @@ const updatePromptWorkerPhase = async ({
   });
 
 const main = async () => {
+  const workerStartedAtMs = Date.now();
+  let shutdownStartedAtMs: number | null = null;
+
   if (!process.env.WORKER_ROLE) {
     const roleFromArg = parseRoleArg(process.argv.slice(2));
 
@@ -174,6 +177,7 @@ const main = async () => {
     }
 
     const succeeded = prompt.status === "completed";
+    shutdownStartedAtMs = Date.now();
 
     await updatePromptExecution(execution.id, {
       status: succeeded ? "completed" : "failed",
@@ -208,6 +212,7 @@ const main = async () => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Prompt worker failed.";
+    shutdownStartedAtMs = shutdownStartedAtMs || Date.now();
 
     await updatePromptExecution(execution.id, {
       status: "failed",
@@ -234,6 +239,20 @@ const main = async () => {
     process.stderr.write(`${message}\n`);
     process.exitCode = 1;
   } finally {
+    if (shutdownStartedAtMs !== null) {
+      await updatePrompt(contract.promptId, {
+        metadataPatch: {
+          worker: {
+            lifecycle: {
+              recordedAt: new Date().toISOString(),
+              workerTotalMs: Math.max(0, Date.now() - workerStartedAtMs),
+              exitContainerMs: Math.max(0, Date.now() - shutdownStartedAtMs)
+            }
+          }
+        }
+      }).catch(() => undefined);
+    }
+
     await pool.end().catch(() => undefined);
   }
 };

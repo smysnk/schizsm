@@ -35,11 +35,14 @@ import {
   buildPromptCommitSubject,
   createRunArtifacts,
   resolvePromptExecutionRoots,
-  runGit
+  runGit,
+  summarizeGitOperations
 } from "../worker/runtime-shared";
 import type { CodexRunOutput, ContainerDocumentRepo, RunArtifacts } from "../worker/runtime-types";
 import { dispatchPromptToKubeWorker } from "./prompt-dispatcher";
 import { reconcileKubePromptExecutions } from "./prompt-worker-observer";
+import { runCanvasRearrangeCommand, toCanvasRearrangeMetadata } from "./canvas-rearrange";
+import type { PromptPerformanceDetails } from "./prompt-audit-timing";
 
 export { buildPromptCommitSubject, resolvePromptExecutionRoots } from "../worker/runtime-shared";
 
@@ -373,6 +376,33 @@ export class PromptRunner {
     const artifacts = await createRunArtifacts(artifactsRoot, prompt.id);
     const transitions: RunnerTransition[] = [];
     const promptStartedAt = Date.now();
+    const stepDurations: {
+      runtimeSetupMs: number | null;
+      preflightCanvasValidationMs: number | null;
+      agentWorkMs: number | null;
+      outputReadMs: number | null;
+      canvasRearrangeMs: number | null;
+      postflightCanvasValidationMs: number | null;
+      saveStatsToAuditMs: number | null;
+      gitCommitMs: number | null;
+      gitPushMs: number | null;
+      auditSyncMs: number | null;
+      finalizationMs: number | null;
+      exitContainerMs: number | null;
+    } = {
+      runtimeSetupMs: null,
+      preflightCanvasValidationMs: null,
+      agentWorkMs: null,
+      outputReadMs: null,
+      canvasRearrangeMs: null,
+      postflightCanvasValidationMs: null,
+      saveStatsToAuditMs: null,
+      gitCommitMs: null,
+      gitPushMs: null,
+      auditSyncMs: null,
+      finalizationMs: null,
+      exitContainerMs: null
+    };
     let preflightCanvasReport: CanvasValidationReport | null = null;
     let postflightCanvasReport: CanvasValidationReport | null = null;
     let preparedWorktree: PreparedPromptWorktree | null = null;
@@ -396,6 +426,40 @@ export class PromptRunner {
       auditSyncStderrPath: artifacts.auditSyncStderrPath,
       gitOperations,
       statusTransitions: transitions
+    };
+
+    const buildProfiling = (): PromptPerformanceDetails => {
+      const totalRuntimeMs = Math.max(0, Date.now() - promptStartedAt);
+      const gitSummary = summarizeGitOperations(gitOperations);
+
+      return {
+        totalRuntimeMs,
+        dockerOperationsMs:
+          env.promptRunnerExecutionMode === "container" ||
+          env.promptRunnerExecutionMode === "kube-worker"
+            ? stepDurations.runtimeSetupMs
+            : null,
+        gitOperationsMs: gitSummary.totalMs,
+        gitOperationCount: gitSummary.count,
+        agentWorkMs: stepDurations.agentWorkMs,
+        canvasRearrangeMs: stepDurations.canvasRearrangeMs,
+        saveStatsToAuditMs: stepDurations.saveStatsToAuditMs,
+        gitCommitMs: stepDurations.gitCommitMs,
+        gitPushMs: stepDurations.gitPushMs,
+        exitContainerMs:
+          env.promptRunnerExecutionMode === "container" ||
+          env.promptRunnerExecutionMode === "kube-worker"
+            ? stepDurations.exitContainerMs
+            : null,
+        steps: {
+          runtimeSetupMs: stepDurations.runtimeSetupMs,
+          preflightCanvasValidationMs: stepDurations.preflightCanvasValidationMs,
+          outputReadMs: stepDurations.outputReadMs,
+          postflightCanvasValidationMs: stepDurations.postflightCanvasValidationMs,
+          auditSyncMs: stepDurations.auditSyncMs,
+          finalizationMs: stepDurations.finalizationMs
+        }
+      };
     };
 
     this.activePromptId = prompt.id;
@@ -479,6 +543,7 @@ export class PromptRunner {
       let documentStoreBaseCommitSha = "";
       const expectedCommitSubject = buildPromptCommitSubject(prompt.content);
 
+      const runtimeSetupStartedAt = Date.now();
       if (
         env.promptRunnerExecutionMode === "container" ||
         env.promptRunnerExecutionMode === "kube-worker"
@@ -600,6 +665,7 @@ export class PromptRunner {
           controllerRemovedPaths: preparedWorktree.controllerRemovedPaths
         });
       }
+      stepDurations.runtimeSetupMs = Math.max(0, Date.now() - runtimeSetupStartedAt);
 
       ({ codexRepoRoot, auditSyncRepoRoot } = resolvePromptExecutionRoots({
         repoRoot,
@@ -619,11 +685,16 @@ export class PromptRunner {
       runnerMetadata.auditSyncRepoRoot = auditSyncRepoRoot;
       runnerMetadata.expectedCommitSubject = expectedCommitSubject;
 
+      const preflightCanvasValidationStartedAt = Date.now();
       preflightCanvasReport = await validateCanvasState({
         repoRoot,
         knowledgeRoot: documentStoreRoot,
         requireCanonical: false
       });
+      stepDurations.preflightCanvasValidationMs = Math.max(
+        0,
+        Date.now() - preflightCanvasValidationStartedAt
+      );
 
       runnerMetadata.canvasValidation = {
         preflight: preflightCanvasReport
@@ -665,12 +736,14 @@ export class PromptRunner {
       });
 
       await transitionTo("writing", "Launching Codex CLI.");
+      const agentWorkStartedAt = Date.now();
       const execution = await executePromptWithCodex({
         instruction,
         artifacts,
         repoRoot: codexRepoRoot,
         schemaPath
       });
+      stepDurations.agentWorkMs = Math.max(0, Date.now() - agentWorkStartedAt);
 
       await transitionTo("auditing", "Codex CLI completed. Parsing structured output.", {
         exitCode: execution.exitCode ?? -1,
@@ -686,7 +759,9 @@ export class PromptRunner {
         );
       }
 
+      const outputReadStartedAt = Date.now();
       const finalOutput = await readPromptExecutionOutput(artifacts.outputPath);
+      stepDurations.outputReadMs = Math.max(0, Date.now() - outputReadStartedAt);
 
       if (finalOutput.promptId !== prompt.id) {
         throw new Error(
@@ -697,12 +772,41 @@ export class PromptRunner {
       const terminalStatus =
         finalOutput.resultStatus === "failed" ? "failed" : "completed";
 
-      await transitionTo("updating_canvas", "Validating canvas files after Codex output.");
+      const shouldRunCanvasRearrange =
+        terminalStatus === "completed" &&
+        finalOutput.repoChanges.canvasUpdated &&
+        Boolean(env.promptRunnerCanvasRearrangeCommand.trim());
+
+      await transitionTo(
+        "updating_canvas",
+        shouldRunCanvasRearrange
+          ? "Running canvas rearranging script and validating canvas files after Codex output."
+          : "Validating canvas files after Codex output."
+      );
+
+      if (shouldRunCanvasRearrange) {
+        const canvasRearrangeStartedAt = Date.now();
+        runnerMetadata.canvasRearrange = toJsonValue(
+          toCanvasRearrangeMetadata(
+            await runCanvasRearrangeCommand({
+              repoRoot,
+              documentStoreRoot
+            })
+          )
+        ) as JsonObject;
+        stepDurations.canvasRearrangeMs = Math.max(0, Date.now() - canvasRearrangeStartedAt);
+      }
+
+      const postflightCanvasValidationStartedAt = Date.now();
       postflightCanvasReport = await validateCanvasState({
         repoRoot,
         knowledgeRoot: documentStoreRoot,
         requireCanonical: finalOutput.repoChanges.canvasUpdated
       });
+      stepDurations.postflightCanvasValidationMs = Math.max(
+        0,
+        Date.now() - postflightCanvasValidationStartedAt
+      );
       runnerMetadata.canvasValidation = {
         preflight: preflightCanvasReport,
         postflight: postflightCanvasReport
@@ -723,7 +827,8 @@ export class PromptRunner {
         auditSyncResult,
         containerVerification,
         clonedDocumentStoreVerification,
-        worktreeCommitVerification
+        worktreeCommitVerification,
+        profiling: publisherProfiling
       } = await runPromptPublisherPhase({
         prompt,
         terminalStatus,
@@ -739,6 +844,7 @@ export class PromptRunner {
         preparedWorktree,
         documentStoreBaseCommitSha,
         worktreeBaseCommitSha,
+        performanceForAudit: buildProfiling(),
         gitOperations,
         onBeforePush: async ({ target }) => {
           await transitionTo(
@@ -756,9 +862,15 @@ export class PromptRunner {
         }
       });
 
+      stepDurations.saveStatsToAuditMs = publisherProfiling.saveStatsToAuditMs;
+      stepDurations.gitCommitMs = publisherProfiling.gitCommitMs;
+      stepDurations.gitPushMs = publisherProfiling.gitPushMs;
+      stepDurations.auditSyncMs = publisherProfiling.auditSyncMs;
       runnerMetadata.auditTiming = auditTimingResult;
+      runnerMetadata.profiling = buildProfiling();
 
       if (terminalStatus === "completed" && preparedWorktree) {
+        const finalizationStartedAt = Date.now();
         await transitionTo(
           "pushing",
           preparedWorktree.outerAutomationRemoteSync
@@ -771,6 +883,7 @@ export class PromptRunner {
         finalizedWorktree = toJsonValue(
           await finalizePromptWorktree(preparedWorktree)
         ) as JsonObject;
+        stepDurations.finalizationMs = Math.max(0, Date.now() - finalizationStartedAt);
 
         if (
           preparedWorktree.outerAutomationRemoteSync &&
@@ -796,6 +909,7 @@ export class PromptRunner {
             finalOutputCapturedAt: new Date().toISOString(),
             durationMs: Date.now() - promptStartedAt,
             auditTiming: auditTimingResult,
+            profiling: buildProfiling(),
             finalGit: finalGitResult
           },
           execution: {
@@ -857,6 +971,7 @@ export class PromptRunner {
     } catch (error) {
       const message = toErrorMessage(error);
       const failureTelemetry = buildFailureTelemetry(error);
+      runnerMetadata.profiling = buildProfiling();
 
       await updatePrompt(prompt.id, {
         status: "failed",

@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { PreparedPromptWorktree } from "../services/git-worktree";
-import { appendPromptTimingToAuditSection } from "../services/prompt-audit-timing";
+import {
+  appendPromptTimingToAuditSection,
+  type PromptPerformanceDetails
+} from "../services/prompt-audit-timing";
 import { verifyContainerDocumentRepoPush } from "../services/container-document-repo";
 import type { Prompt, JsonObject } from "../repositories/prompt-repository";
 import type { ContainerDocumentRepo, RunArtifacts, CodexRunOutput } from "./runtime-types";
@@ -133,6 +136,12 @@ export type PromptPublisherPhaseResult = {
   containerVerification: JsonObject | null;
   clonedDocumentStoreVerification: JsonObject | null;
   worktreeCommitVerification: JsonObject | null;
+  profiling: {
+    saveStatsToAuditMs: number | null;
+    gitCommitMs: number | null;
+    gitPushMs: number | null;
+    auditSyncMs: number | null;
+  };
 };
 
 export const runPromptPublisherPhase = async ({
@@ -150,6 +159,7 @@ export const runPromptPublisherPhase = async ({
   preparedWorktree,
   documentStoreBaseCommitSha,
   worktreeBaseCommitSha,
+  performanceForAudit,
   gitOperations,
   onBeforePush,
   onBeforeAuditSync
@@ -168,6 +178,7 @@ export const runPromptPublisherPhase = async ({
   preparedWorktree: PreparedPromptWorktree | null;
   documentStoreBaseCommitSha: string;
   worktreeBaseCommitSha: string;
+  performanceForAudit?: PromptPerformanceDetails;
   gitOperations?: JsonObject[];
   onBeforePush?: (detail: { target: "container" | "clone" | "worktree"; branch: string }) => Promise<void> | void;
   onBeforeAuditSync?: () => Promise<void> | void;
@@ -178,6 +189,12 @@ export const runPromptPublisherPhase = async ({
   let auditTimingResult: JsonObject | null = null;
   let finalGitResult: JsonObject | null = null;
   let auditSyncResult: JsonObject | null = null;
+  const profiling = {
+    saveStatsToAuditMs: null,
+    gitCommitMs: null,
+    gitPushMs: null,
+    auditSyncMs: null
+  };
 
   if (!finalOutput.audit.appended && terminalStatus === "completed") {
     throw new Error("Codex reported a completed run without appending an audit section.");
@@ -185,15 +202,32 @@ export const runPromptPublisherPhase = async ({
 
   if (terminalStatus === "completed") {
     const finalizedAt = new Date().toISOString();
-    auditTimingResult = toJsonValue(
-      await appendPromptTimingToAuditSection({
-        auditPath,
-        promptId: prompt.id,
-        createdAt: prompt.createdAt,
-        startedAt: prompt.startedAt,
-        finalizedAt
-      })
-    ) as JsonObject;
+    const auditWriteStartedAt = Date.now();
+    const initialAuditTimingResult = await appendPromptTimingToAuditSection({
+      auditPath,
+      promptId: prompt.id,
+      createdAt: prompt.createdAt,
+      startedAt: prompt.startedAt,
+      finalizedAt,
+      performance: performanceForAudit
+    });
+    profiling.saveStatsToAuditMs = Math.max(0, Date.now() - auditWriteStartedAt);
+
+    if (performanceForAudit) {
+      performanceForAudit.saveStatsToAuditMs = profiling.saveStatsToAuditMs;
+      auditTimingResult = toJsonValue(
+        await appendPromptTimingToAuditSection({
+          auditPath,
+          promptId: prompt.id,
+          createdAt: prompt.createdAt,
+          startedAt: prompt.startedAt,
+          finalizedAt,
+          performance: performanceForAudit
+        })
+      ) as JsonObject;
+    } else {
+      auditTimingResult = toJsonValue(initialAuditTimingResult) as JsonObject;
+    }
 
     if (containerDocumentRepo) {
       await assertHeadMatches({
@@ -202,23 +236,27 @@ export const runPromptPublisherPhase = async ({
         gitOperations
       });
 
+      const commitStartedAt = Date.now();
       const commitResult = await createPromptCommit({
         repoRoot,
         commitSubject: expectedCommitSubject,
         gitOperations
       });
+      profiling.gitCommitMs = Math.max(0, Date.now() - commitStartedAt);
 
       await onBeforePush?.({
         target: "container",
         branch: containerDocumentRepo.branch
       });
 
+      const pushStartedAt = Date.now();
       await pushPromptCommit({
         repoRoot,
         remoteName: containerDocumentRepo.remoteName,
         branch: containerDocumentRepo.branch,
         gitOperations
       });
+      profiling.gitPushMs = Math.max(0, Date.now() - pushStartedAt);
 
       containerVerification = toJsonValue(
         await verifyContainerDocumentRepoPush({
@@ -250,23 +288,27 @@ export const runPromptPublisherPhase = async ({
         gitOperations
       });
 
+      const commitStartedAt = Date.now();
       const commitResult = await createPromptCommit({
         repoRoot: documentStoreRoot,
         commitSubject: expectedCommitSubject,
         gitOperations
       });
+      profiling.gitCommitMs = Math.max(0, Date.now() - commitStartedAt);
 
       await onBeforePush?.({
         target: "clone",
         branch: preparedWorktree.documentStoreCloneBranch
       });
 
+      const pushStartedAt = Date.now();
       await pushPromptCommit({
         repoRoot: documentStoreRoot,
         remoteName: "origin",
         branch: preparedWorktree.documentStoreCloneBranch,
         gitOperations
       });
+      profiling.gitPushMs = Math.max(0, Date.now() - pushStartedAt);
 
       clonedDocumentStoreVerification = toJsonValue(
         await verifyContainerDocumentRepoPush({
@@ -296,12 +338,14 @@ export const runPromptPublisherPhase = async ({
         gitOperations
       });
 
+      const commitStartedAt = Date.now();
       const commitResult = await createPromptCommit({
         repoRoot,
         commitSubject: expectedCommitSubject,
         pathspecs: [preparedWorktree.documentStoreDir],
         gitOperations
       });
+      profiling.gitCommitMs = Math.max(0, Date.now() - commitStartedAt);
 
       worktreeCommitVerification = toJsonValue(
         await verifySinglePromptCommit({
@@ -330,6 +374,7 @@ export const runPromptPublisherPhase = async ({
   if (finalOutput.audit.appended) {
     await onBeforeAuditSync?.();
 
+    const auditSyncStartedAt = Date.now();
     auditSyncResult = await executeAuditSync({
       promptId: prompt.id,
       artifacts,
@@ -337,6 +382,7 @@ export const runPromptPublisherPhase = async ({
       auditPath,
       scriptRepoRoot: controllerRepoRoot
     });
+    profiling.auditSyncMs = Math.max(0, Date.now() - auditSyncStartedAt);
   }
 
   return {
@@ -345,6 +391,7 @@ export const runPromptPublisherPhase = async ({
     auditSyncResult,
     containerVerification,
     clonedDocumentStoreVerification,
-    worktreeCommitVerification
+    worktreeCommitVerification,
+    profiling
   };
 };

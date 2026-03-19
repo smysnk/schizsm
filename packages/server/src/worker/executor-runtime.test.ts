@@ -32,6 +32,7 @@ test("buildPromptExecutionInstruction preserves the runner-owned final commit co
   });
 
   assert.match(instruction, /Do not commit or push changes yourself/);
+  assert.match(instruction, /runner to optionally run a configured canvas rearranging command/);
   assert.match(instruction, /runner will append timing details/);
   assert.match(instruction, /Use this exact final commit subject: "hello world"/);
 });

@@ -8,10 +8,15 @@ import type { RunArtifacts } from "./runtime-types";
 
 const execFileAsync = promisify(execFile);
 
-type GitOperationTrace = {
+export type GitOperationTrace = {
   at: string;
+  startedAt: string;
+  finishedAt?: string;
+  durationMs?: number;
   repoRoot: string;
   command: string;
+  succeeded?: boolean;
+  error?: string | null;
 };
 
 const normalizePromptSummarySource = (content: string) =>
@@ -101,20 +106,41 @@ const formatShellArgument = (value: string) =>
 const formatGitCommand = (args: string[]) =>
   ["git", ...args].map((value) => formatShellArgument(value)).join(" ");
 
-export const traceGitOperation = (
+const startGitOperationTrace = (
   gitOperations: JsonObject[] | undefined,
   repoRoot: string,
   args: string[]
 ) => {
-  if (!gitOperations) {
-    return;
-  }
-
-  gitOperations.push({
-    at: new Date().toISOString(),
+  const startedAt = new Date().toISOString();
+  const trace: GitOperationTrace = {
+    at: startedAt,
+    startedAt,
     repoRoot,
     command: formatGitCommand(args)
-  } satisfies GitOperationTrace as JsonObject);
+  };
+
+  if (gitOperations) {
+    gitOperations.push(trace as unknown as JsonObject);
+  }
+
+  return trace;
+};
+
+const finishGitOperationTrace = (
+  trace: GitOperationTrace,
+  startedAtMs: number,
+  {
+    succeeded,
+    error
+  }: {
+    succeeded: boolean;
+    error?: string | null;
+  }
+) => {
+  trace.finishedAt = new Date().toISOString();
+  trace.durationMs = Math.max(0, Date.now() - startedAtMs);
+  trace.succeeded = succeeded;
+  trace.error = error || null;
 };
 
 export const runGit = async (
@@ -122,15 +148,53 @@ export const runGit = async (
   args: string[],
   gitOperations?: JsonObject[]
 ) => {
-  traceGitOperation(gitOperations, repoRoot, args);
+  const startedAtMs = Date.now();
+  const trace = startGitOperationTrace(gitOperations, repoRoot, args);
 
-  const { stdout } = await execFileAsync("git", args, {
-    cwd: repoRoot,
-    env: process.env,
-    encoding: "utf8"
-  });
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      cwd: repoRoot,
+      env: process.env,
+      encoding: "utf8"
+    });
 
-  return stdout.trim();
+    finishGitOperationTrace(trace, startedAtMs, {
+      succeeded: true
+    });
+    return stdout.trim();
+  } catch (error) {
+    const message =
+      error instanceof Error && "stderr" in error && typeof error.stderr === "string"
+        ? error.stderr.trim() || error.message
+        : error instanceof Error
+          ? error.message
+          : "Git command failed.";
+
+    finishGitOperationTrace(trace, startedAtMs, {
+      succeeded: false,
+      error: message
+    });
+    throw error;
+  }
+};
+
+export const summarizeGitOperations = (gitOperations: JsonObject[] = []) => {
+  let totalMs = 0;
+  let count = 0;
+
+  for (const operation of gitOperations) {
+    const durationMs = operation.durationMs;
+
+    if (typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs >= 0) {
+      totalMs += durationMs;
+      count += 1;
+    }
+  }
+
+  return {
+    totalMs,
+    count
+  };
 };
 
 export const resolveCommitSha = async (

@@ -102,6 +102,8 @@ export const env = {
         : "worktree",
   promptRunnerPollMs: parseNumber(process.env.PROMPT_RUNNER_POLL_MS, 5_000),
   promptRunnerCodexBin: process.env.CODEX_BIN || "codex",
+  promptRunnerCanvasRearrangeCommand:
+    process.env.PROMPT_RUNNER_CANVAS_REARRANGE_COMMAND || "",
   promptRunnerRepoRoot: resolveRepoRoot(),
   promptRunnerAutomationBranch:
     process.env.PROMPT_RUNNER_AUTOMATION_BRANCH || "codex/mindmap",

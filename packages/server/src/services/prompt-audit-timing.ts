@@ -8,6 +8,27 @@ export type PromptTimingDetails = {
   processingMs: number | null;
 };
 
+export type PromptPerformanceDetails = {
+  totalRuntimeMs: number | null;
+  dockerOperationsMs: number | null;
+  gitOperationsMs: number | null;
+  gitOperationCount: number;
+  agentWorkMs: number | null;
+  canvasRearrangeMs: number | null;
+  saveStatsToAuditMs: number | null;
+  gitCommitMs: number | null;
+  gitPushMs: number | null;
+  exitContainerMs: number | null;
+  steps: {
+    runtimeSetupMs: number | null;
+    preflightCanvasValidationMs: number | null;
+    outputReadMs: number | null;
+    postflightCanvasValidationMs: number | null;
+    auditSyncMs: number | null;
+    finalizationMs: number | null;
+  };
+};
+
 const jsonFencePattern = /```json\s*([\s\S]*?)\s*```/i;
 
 const formatDuration = (durationMs: number | null) => {
@@ -40,6 +61,17 @@ const formatDuration = (durationMs: number | null) => {
   return remainingMinutes > 0
     ? `${hours}h ${remainingMinutes}m (${durationMs} ms)`
     : `${hours}h (${durationMs} ms)`;
+};
+
+const formatDurationOrLabel = (
+  durationMs: number | null,
+  emptyLabel: string
+) => {
+  if (durationMs === null || !Number.isFinite(durationMs) || durationMs < 0) {
+    return emptyLabel;
+  }
+
+  return formatDuration(durationMs);
 };
 
 const parseTimestamp = (value: string | null) => {
@@ -80,7 +112,52 @@ export const buildPromptTimingDetails = ({
 const replaceJsonFence = (rawSection: string, nextJson: string) =>
   rawSection.replace(jsonFencePattern, `\`\`\`json\n${nextJson}\n\`\`\``);
 
-const upsertTimingSection = (rawSection: string, details: PromptTimingDetails) => {
+const upsertTimingSection = (
+  rawSection: string,
+  details: PromptTimingDetails,
+  performance?: PromptPerformanceDetails
+) => {
+  const performanceSection = performance
+    ? `### Profiling
+- Total Runtime: ${formatDurationOrLabel(performance.totalRuntimeMs, "Unavailable")}
+- Docker Operations: ${formatDurationOrLabel(performance.dockerOperationsMs, "Not applicable")}
+- Git Operations: ${formatDurationOrLabel(
+        performance.gitOperationsMs,
+        "Unavailable"
+      )}${performance.gitOperationCount > 0 ? ` across ${performance.gitOperationCount} commands` : ""}
+- Agent Work: ${formatDurationOrLabel(performance.agentWorkMs, "Unavailable")}
+- Canvas Re-arranging: ${formatDurationOrLabel(performance.canvasRearrangeMs, "Skipped")}
+- Save Stats To Audit: ${formatDurationOrLabel(
+        performance.saveStatsToAuditMs,
+        "Unavailable"
+      )}
+- Git Commit: ${formatDurationOrLabel(performance.gitCommitMs, "Skipped")}
+- Git Push: ${formatDurationOrLabel(performance.gitPushMs, "Skipped")}
+- Exit Container: ${formatDurationOrLabel(performance.exitContainerMs, "Unavailable")}
+- Runtime Setup: ${formatDurationOrLabel(
+        performance.steps.runtimeSetupMs,
+        "Unavailable"
+      )}
+- Preflight Canvas Validation: ${formatDurationOrLabel(
+        performance.steps.preflightCanvasValidationMs,
+        "Unavailable"
+      )}
+- Read Codex Output: ${formatDurationOrLabel(
+        performance.steps.outputReadMs,
+        "Unavailable"
+      )}
+- Postflight Canvas Validation: ${formatDurationOrLabel(
+        performance.steps.postflightCanvasValidationMs,
+        "Unavailable"
+      )}
+- Audit Sync: ${formatDurationOrLabel(performance.steps.auditSyncMs, "Skipped")}
+- Finalization: ${formatDurationOrLabel(
+        performance.steps.finalizationMs,
+        "Unavailable"
+      )}
+
+`
+    : "";
   const timingSection = `### Timing
 - Queued At: ${details.queuedAt || "Unavailable"}
 - Started At: ${details.startedAt || "Unavailable"}
@@ -88,6 +165,7 @@ const upsertTimingSection = (rawSection: string, details: PromptTimingDetails) =
 - Time In Queue: ${formatDuration(details.queueWaitMs)}
 - Processing Time: ${formatDuration(details.processingMs)}
 
+${performanceSection}
 `;
 
   if (/^### Timing\s*$/m.test(rawSection)) {
@@ -105,13 +183,15 @@ export const appendPromptTimingToAuditSection = async ({
   promptId,
   createdAt,
   startedAt,
-  finalizedAt
+  finalizedAt,
+  performance
 }: {
   auditPath: string;
   promptId: string;
   createdAt: string | null;
   startedAt: string | null;
   finalizedAt: string;
+  performance?: PromptPerformanceDetails;
 }) => {
   const auditSource = await fs.readFile(auditPath, "utf8");
   const sectionStartMarker = `<!-- PROMPT-AUDIT-START:${promptId} -->`;
@@ -150,7 +230,11 @@ export const appendPromptTimingToAuditSection = async ({
     processingMs: timing.processingMs
   };
 
-  const withTimingSection = upsertTimingSection(rawSection, timing);
+  if (performance) {
+    parsedJson.performance = performance;
+  }
+
+  const withTimingSection = upsertTimingSection(rawSection, timing, performance);
   const nextSection = replaceJsonFence(withTimingSection, JSON.stringify(parsedJson, null, 2));
   const nextAudit = `${auditSource.slice(0, startIndex)}${nextSection}${auditSource.slice(
     endIndex + sectionEndMarker.length
@@ -161,6 +245,7 @@ export const appendPromptTimingToAuditSection = async ({
   return {
     auditPath,
     promptId,
-    timing
+    timing,
+    performance: performance || null
   };
 };

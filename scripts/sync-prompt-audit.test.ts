@@ -82,6 +82,26 @@ test("sync prompt audit preserves contextual relevance and hypothesis state", ()
     "queueWaitMs": 60000,
     "processingMs": 105000
   },
+  "performance": {
+    "totalRuntimeMs": 105000,
+    "dockerOperationsMs": 5000,
+    "gitOperationsMs": 1800,
+    "gitOperationCount": 3,
+    "agentWorkMs": 80000,
+    "canvasRearrangeMs": 1200,
+    "saveStatsToAuditMs": 200,
+    "gitCommitMs": null,
+    "gitPushMs": null,
+    "exitContainerMs": null,
+    "steps": {
+      "runtimeSetupMs": 5000,
+      "preflightCanvasValidationMs": 40,
+      "outputReadMs": 20,
+      "postflightCanvasValidationMs": 70,
+      "auditSyncMs": null,
+      "finalizationMs": null
+    }
+  },
   "hypotheses": {
     "created": [
       "obsidian-repository/hypotheses/repeated-clock-time-may-relate-to-frequency-illusion.md"
@@ -141,5 +161,25 @@ test("sync prompt audit preserves contextual relevance and hypothesis state", ()
     finalizedAt: "2026-03-16T03:12:45Z",
     queueWaitMs: 60000,
     processingMs: 105000
+  });
+  assert.deepEqual(payload.performance, {
+    totalRuntimeMs: 105000,
+    dockerOperationsMs: 5000,
+    gitOperationsMs: 1800,
+    gitOperationCount: 3,
+    agentWorkMs: 80000,
+    canvasRearrangeMs: 1200,
+    saveStatsToAuditMs: 200,
+    gitCommitMs: null,
+    gitPushMs: null,
+    exitContainerMs: null,
+    steps: {
+      runtimeSetupMs: 5000,
+      preflightCanvasValidationMs: 40,
+      outputReadMs: 20,
+      postflightCanvasValidationMs: 70,
+      auditSyncMs: null,
+      finalizationMs: null
+    }
   });
 });
