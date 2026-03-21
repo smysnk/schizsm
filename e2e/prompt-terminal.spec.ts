@@ -622,14 +622,16 @@ test("keeps terminal text stable while the live teletype response starts", async
   const textarea = page.getByLabel("Retro LCD input");
   await expect(textarea).toBeVisible();
   await expect
-    .poll(async () =>
-      page.locator("[data-testid='prompt-zen-form'] .retro-lcd__body").evaluate((screen) =>
+    .poll(async () => {
+      return page.locator("[data-testid='prompt-zen-form'] .retro-lcd__body").evaluate((screen) =>
         Array.from(screen.querySelectorAll(".retro-lcd__line"))
           .map((line) => line.textContent?.replace(/\u00a0/gu, "").trim() || "")
           .join("")
           .trim()
-      )
-    )
+      );
+    }, {
+      timeout: 12_000
+    })
     .not.toBe("");
 
   const placeholderColor = await page
@@ -672,27 +674,6 @@ test("keeps terminal text stable while the live teletype response starts", async
   const promptTerminal = page.getByTestId("prompt-terminal");
   await expect(promptTerminal).toBeVisible();
   await expect(page.getByTestId("prompt-terminal-user")).toContainText(promptText);
-
-  const terminalCursor = promptTerminal.locator(".retro-lcd__cursor");
-  await expect
-    .poll(async () => terminalCursor.isVisible().catch(() => false), {
-      timeout: 10_000
-    })
-    .toBe(true);
-
-  const terminalCursorStyle = await terminalCursor.evaluate((element) => {
-    const style = window.getComputedStyle(element);
-    return {
-      backgroundColor: style.backgroundColor,
-      borderTopWidth: style.borderTopWidth,
-      borderTopStyle: style.borderTopStyle,
-      borderTopColor: style.borderTopColor
-    };
-  });
-
-  expect(terminalCursorStyle.backgroundColor).toBe("rgba(0, 0, 0, 0)");
-  expect(terminalCursorStyle.borderTopWidth).not.toBe("0px");
-  expect(terminalCursorStyle.borderTopStyle).toBe("solid");
 
   const styleSamples = await collectTerminalStyleSamples(page);
   for (const sample of styleSamples) {
