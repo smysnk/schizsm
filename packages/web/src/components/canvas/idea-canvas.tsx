@@ -833,7 +833,7 @@ export function IdeaCanvas() {
   };
 
   return (
-    <main className="workspace">
+    <main className={`workspace workspace--${activeSurface}`}>
       <div className="workspace__shell">
         {promptsError ? (
           <div className="workspace-panel workspace__banner" role="status">
@@ -1331,6 +1331,12 @@ export function IdeaCanvas() {
               </span>
             </span>
           </div>
+
+          <div
+            className="workspace__footer-center"
+            id="graph-menubar-slot"
+            aria-live="polite"
+          />
 
           <div className="workspace__footer-utilities">
             <a

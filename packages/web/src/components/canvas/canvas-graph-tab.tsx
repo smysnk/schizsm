@@ -16,6 +16,7 @@ import {
 import {
   canvasGraphTuningStorageKey,
   defaultCanvasGraphTuningSettings,
+  filterCanvasGraphSnapshotToNeighborhood,
   normalizeCanvasGraphTuningSettings,
   type CanvasGraphTuningSettings
 } from "./canvas-graph-layout";
@@ -118,6 +119,7 @@ export function CanvasGraphTab({
   const lastRefreshTokenRef = useRef<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<CanvasGraphRenderNode | null>(null);
   const [showMarkdownLinks, setShowMarkdownLinks] = useState(true);
+  const [focusSelectedNeighborhood, setFocusSelectedNeighborhood] = useState(false);
   const [selectedCanvasPath, setSelectedCanvasPath] = useState<string | null>(null);
   const [graphTuning, setGraphTuning] = useState<CanvasGraphTuningSettings>(
     defaultCanvasGraphTuningSettings
@@ -218,7 +220,7 @@ export function CanvasGraphTab({
         : null,
     [data]
   );
-  const visibleSnapshot = useMemo(() => {
+  const baseSnapshot = useMemo(() => {
     if (!snapshot) {
       return null;
     }
@@ -230,6 +232,13 @@ export function CanvasGraphTab({
       )
     };
   }, [showMarkdownLinks, snapshot]);
+  const visibleSnapshot = useMemo(
+    () =>
+      baseSnapshot && focusSelectedNeighborhood
+        ? filterCanvasGraphSnapshotToNeighborhood(baseSnapshot, selectedNode?.id || null)
+        : baseSnapshot,
+    [baseSnapshot, focusSelectedNeighborhood, selectedNode]
+  );
   const highlightedNodeIds = useMemo(
     () => getCanvasGraphHighlightedNodeIds(snapshot, highlightedNotePaths),
     [highlightedNotePaths, snapshot]
@@ -247,105 +256,29 @@ export function CanvasGraphTab({
       (edge) => edge.sourceId === selectedNode.id || edge.targetId === selectedNode.id
     );
   }, [selectedNode, visibleSnapshot]);
-
-  if (loading && !visibleSnapshot) {
-    return (
-      <section className="graph-surface graph-surface--empty">
-        <div className="graph-surface__empty">
-          <p className="workspace__eyebrow">Canvas graph</p>
-          <p className="panel-copy">Loading canvas graph.</p>
-        </div>
-      </section>
-    );
-  }
-
-  if (error) {
-    return (
-      <section className="graph-surface graph-surface--empty">
-        <div className="graph-surface__empty">
-          <p className="workspace__eyebrow">Canvas graph</p>
-          <p className="panel-copy">Unable to load the graph right now.</p>
-          <p className="prompt-detail__error">{error.message}</p>
-        </div>
-      </section>
-    );
-  }
-
-  if (!visibleSnapshot || visibleSnapshot.nodes.length === 0) {
-    return (
-      <section className="graph-surface graph-surface--empty">
-        <div className="graph-surface__empty">
-          <p className="workspace__eyebrow">Canvas graph</p>
-          <p className="panel-copy">
-            No canvas nodes are available yet. Once `main.canvas` has note or text nodes, the graph
-            will appear here.
-          </p>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="graph-surface">
-      <div className="graph-surface__header">
-        <div>
-          <p className="workspace__eyebrow">Canvas graph</p>
-          <h2 className="graph-surface__title">Force view of {visibleSnapshot.canvasPath}</h2>
-          <p className="panel-copy graph-surface__copy">
-            This view keeps the current Obsidian canvas relationships, then lets the graph breathe
-            with pan, zoom, selection, and drag-based pinning.
-          </p>
-        </div>
-        <div className="graph-surface__stats">
-          <div className="stat-card">
-            <span className="stat-card__label">Nodes</span>
-            <strong>{visibleSnapshot.nodes.length}</strong>
-          </div>
-          <div className="stat-card">
-            <span className="stat-card__label">Edges</span>
-            <strong>{visibleSnapshot.edges.length}</strong>
-          </div>
-          <div className="stat-card">
-            <span className="stat-card__label">Markdown links</span>
-            <strong>{markdownLinkCount}</strong>
-          </div>
-          {highlightedNodeIds.length > 0 ? (
-            <div className="stat-card">
-              <span className="stat-card__label">
-                {highlightedPromptLabel ? `${highlightedPromptLabel} touched` : "Touched nodes"}
-              </span>
-              <strong>{highlightedNodeIds.length}</strong>
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {highlightedNodeIds.length > 0 ? (
-        <p className="graph-surface__context">
-          Highlighting notes touched by {highlightedPromptLabel || "the selected prompt"}.
-        </p>
+  const graphControls = (
+    <div className="graph-menubar">
+      {canvasFiles.length > 1 ? (
+        <label className="graph-surface__selector graph-menubar__selector">
+          <span className="sr-only">Canvas file</span>
+          <select
+            className="graph-surface__select"
+            value={selectedCanvasPath || ""}
+            onChange={(event) => {
+              setSelectedNode(null);
+              setSelectedCanvasPath(event.target.value || null);
+            }}
+          >
+            {canvasFiles.map((canvasFile) => (
+              <option key={canvasFile} value={canvasFile}>
+                {canvasFile}
+              </option>
+            ))}
+          </select>
+        </label>
       ) : null}
 
-      <div className="graph-surface__toolbar">
-        {canvasFiles.length > 1 ? (
-          <label className="graph-surface__selector">
-            <span className="stat-card__label">Canvas file</span>
-            <select
-              className="graph-surface__select"
-              value={selectedCanvasPath || ""}
-              onChange={(event) => {
-                setSelectedNode(null);
-                setSelectedCanvasPath(event.target.value || null);
-              }}
-            >
-              {canvasFiles.map((canvasFile) => (
-                <option key={canvasFile} value={canvasFile}>
-                  {canvasFile}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+      <div className="graph-menubar__controls">
         <button
           type="button"
           className="prompt-filter"
@@ -370,6 +303,15 @@ export function CanvasGraphTab({
           onClick={() => setShowMarkdownLinks((current) => !current)}
         >
           {showMarkdownLinks ? "Hide markdown links" : "Show markdown links"}
+        </button>
+        <button
+          type="button"
+          className="prompt-filter"
+          data-active={focusSelectedNeighborhood && Boolean(selectedNode)}
+          disabled={!selectedNode}
+          onClick={() => setFocusSelectedNeighborhood((current) => !current)}
+        >
+          {focusSelectedNeighborhood ? "Show full graph" : "Focus selected"}
         </button>
         <details className="graph-surface__tuning">
           <summary className="prompt-filter">Tune graph</summary>
@@ -418,18 +360,65 @@ export function CanvasGraphTab({
           </div>
         </details>
       </div>
+    </div>
+  );
 
-      <div className="graph-surface__layout">
-        <div className="graph-surface__panel">
-          <CanvasForceGraph
-            highlightedNodeIds={highlightedNodeIds}
-            highlightedPromptLabel={highlightedPromptLabel}
-            onSelectNode={setSelectedNode}
-            ref={graphRef}
-            snapshot={visibleSnapshot}
-            tuning={graphTuning}
-          />
-          <div className="graph-surface__legend">
+  if (loading && !visibleSnapshot) {
+    return (
+      <section className="graph-surface graph-surface--empty">
+        <div className="graph-surface__empty">
+          <p className="workspace__eyebrow">Canvas graph</p>
+          <p className="panel-copy">Loading canvas graph.</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="graph-surface graph-surface--empty">
+        <div className="graph-surface__empty">
+          <p className="workspace__eyebrow">Canvas graph</p>
+          <p className="panel-copy">Unable to load the graph right now.</p>
+          <p className="prompt-detail__error">{error.message}</p>
+        </div>
+      </section>
+    );
+  }
+
+  if (!visibleSnapshot || visibleSnapshot.nodes.length === 0) {
+    return (
+      <section className="graph-surface graph-surface--empty">
+        <div className="graph-surface__empty">
+          <p className="workspace__eyebrow">Canvas graph</p>
+          <p className="panel-copy">
+            No canvas nodes are available yet. Once `main.canvas` has note or text nodes, the graph
+            will appear here.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="graph-surface graph-surface--fullscreen">
+      <div className="graph-surface__viewport">
+        <div className="graph-surface__controls">{graphControls}</div>
+        <CanvasForceGraph
+          className="graph-surface__graph"
+          highlightedNodeIds={highlightedNodeIds}
+          highlightedPromptLabel={highlightedPromptLabel}
+          onSelectNode={setSelectedNode}
+          ref={graphRef}
+          snapshot={visibleSnapshot}
+          tuning={graphTuning}
+        />
+
+        <aside className="graph-surface__legend graph-surface__legend--dock" tabIndex={0}>
+          <div className="graph-surface__legend-peek">
+            <span className="workspace__eyebrow">Legend</span>
+          </div>
+          <div className="graph-surface__legend-panel">
             <div className="graph-surface__legend-group">
               <span className="workspace__eyebrow">Node legend</span>
               <div className="graph-surface__legend-items">
@@ -470,123 +459,139 @@ export function CanvasGraphTab({
               </div>
             </div>
           </div>
-        </div>
-
-        <aside className="graph-surface__detail prompt-detail">
-          {selectedNode ? (
-            <>
-              <div className="prompt-detail__header">
-                <div>
-                  <p className="workspace__eyebrow">Selected node</p>
-                  <h3>{selectedNode.label}</h3>
-                </div>
-              </div>
-
-              <div className="prompt-detail__stats">
-                <div className="stat-card">
-                  <span className="stat-card__label">Kind</span>
-                  <span className="stat-card__value">
-                    {formatCanvasNodeKind(selectedNode.kind)}
-                  </span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-card__label">Category</span>
-                  <span className="stat-card__value">
-                    {formatCanvasNodeCategory(selectedNode.category)}
-                  </span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-card__label">Degree</span>
-                  <span className="stat-card__value">{selectedNode.degree}</span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-card__label">Inbound</span>
-                  <span className="stat-card__value">{selectedNode.inboundLinkCount}</span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-card__label">Outbound</span>
-                  <span className="stat-card__value">{selectedNode.outboundLinkCount}</span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-card__label">Canvas file</span>
-                  <span className="stat-card__value">{selectedNode.canvasFile}</span>
-                </div>
-                <div className="stat-card">
-                  <span className="stat-card__label">Position</span>
-                  <span className="stat-card__value">
-                    {Math.round(selectedNode.x)}, {Math.round(selectedNode.y)}
-                  </span>
-                </div>
-              </div>
-
-              {selectedNode.notePath ? (
-                <p className="prompt-detail__hint">Note path: {selectedNode.notePath}</p>
-              ) : null}
-              {selectedNodeTouched ? (
-                <p className="prompt-detail__hint">
-                  Touched by {highlightedPromptLabel || "the selected prompt"}.
-                </p>
-              ) : null}
-
-              {selectedEdges.length ? (
-                <div className="prompt-detail__timeline">
-                  {selectedEdges.map((edge) => {
-                    const otherNodeId =
-                      edge.sourceId === selectedNode.id ? edge.targetId : edge.sourceId;
-                    const otherNode =
-                      visibleSnapshot.nodes.find((node) => node.id === otherNodeId) || null;
-
-                    return (
-                      <div className="prompt-detail__step" key={edge.id}>
-                        <div className="prompt-detail__step-row">
-                          <span className="stat-card__label">{edge.kind}</span>
-                          <span className="prompt-item__time">
-                            {edge.tentative ? "Tentative" : "Direct"}
-                          </span>
-                        </div>
-                        <p className="prompt-detail__reason">
-                          {edge.label || "Unlabelled connection"}
-                        </p>
-                        {otherNode ? (
-                          <p className="prompt-detail__hint">Connected to: {otherNode.label}</p>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <>
-                  <p className="prompt-detail__hint">
-                    This node does not currently have visible graph connections.
-                  </p>
-                  {!showMarkdownLinks && markdownLinkCount > 0 ? (
-                    <p className="prompt-detail__hint">
-                      Markdown-link edges are currently hidden.
-                    </p>
-                  ) : null}
-                </>
-              )}
-            </>
-          ) : (
-            <div className="prompt-detail__empty">
-              <p className="workspace__eyebrow">No node selected</p>
-              <p className="panel-copy">
-                Select a graph node to inspect its note path, category, and explicit canvas
-                connections.
-              </p>
-              {highlightedNodeIds.length > 0 ? (
-                <p className="prompt-detail__hint">
-                  Notes touched by {highlightedPromptLabel || "the selected prompt"} are ringed in
-                  gold.
-                </p>
-              ) : null}
-              <p className="prompt-detail__hint">
-                Use Fit graph to reframe the current layout, or Reset layout to return to the
-                canvas-seeded positions and clear pinned nodes.
-              </p>
-            </div>
-          )}
         </aside>
+
+        {selectedNode ? (
+          <aside className="graph-surface__sidepanel">
+            <div className="graph-surface__sidepanel-scroll">
+              <section className="graph-surface__detail graph-surface__detail--floating prompt-detail">
+                <div className="prompt-detail__header">
+                  <div>
+                    <p className="workspace__eyebrow">Selected node</p>
+                    <h3>{selectedNode.label}</h3>
+                  </div>
+                </div>
+
+                <div className="prompt-detail__stats">
+                  <div className="stat-card">
+                    <span className="stat-card__label">Kind</span>
+                    <span className="stat-card__value">
+                      {formatCanvasNodeKind(selectedNode.kind)}
+                    </span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-card__label">Category</span>
+                    <span className="stat-card__value">
+                      {formatCanvasNodeCategory(selectedNode.category)}
+                    </span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-card__label">Degree</span>
+                    <span className="stat-card__value">{selectedNode.degree}</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-card__label">Inbound</span>
+                    <span className="stat-card__value">{selectedNode.inboundLinkCount}</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-card__label">Outbound</span>
+                    <span className="stat-card__value">{selectedNode.outboundLinkCount}</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-card__label">Canvas file</span>
+                    <span className="stat-card__value">{selectedNode.canvasFile}</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-card__label">Position</span>
+                    <span className="stat-card__value">
+                      {Math.round(selectedNode.x)}, {Math.round(selectedNode.y)}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedNode.notePath ? (
+                  <p className="prompt-detail__hint">Note path: {selectedNode.notePath}</p>
+                ) : null}
+                {selectedNodeTouched ? (
+                  <p className="prompt-detail__hint">
+                    Touched by {highlightedPromptLabel || "the selected prompt"}.
+                  </p>
+                ) : null}
+
+                {selectedEdges.length ? (
+                  <div className="prompt-detail__timeline">
+                    {selectedEdges.map((edge) => {
+                      const otherNodeId =
+                        edge.sourceId === selectedNode.id ? edge.targetId : edge.sourceId;
+                      const otherNode =
+                        visibleSnapshot.nodes.find((node) => node.id === otherNodeId) || null;
+
+                      return (
+                        <div className="prompt-detail__step" key={edge.id}>
+                          <div className="prompt-detail__step-row">
+                            <span className="stat-card__label">{edge.kind}</span>
+                            <span className="prompt-item__time">
+                              {edge.tentative ? "Tentative" : "Direct"}
+                            </span>
+                          </div>
+                          <p className="prompt-detail__reason">
+                            {edge.label || "Unlabelled connection"}
+                          </p>
+                          {otherNode ? (
+                            <p className="prompt-detail__hint">Connected to: {otherNode.label}</p>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <>
+                    <p className="prompt-detail__hint">
+                      This node does not currently have visible graph connections.
+                    </p>
+                    {!showMarkdownLinks && markdownLinkCount > 0 ? (
+                      <p className="prompt-detail__hint">
+                        Markdown-link edges are currently hidden.
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </section>
+            </div>
+          </aside>
+        ) : null}
+
+        <footer className="graph-surface__statusbar">
+          <span className="graph-surface__status-item">
+            canvas <strong>{visibleSnapshot.canvasPath}</strong>
+          </span>
+          <span className="graph-surface__status-item">
+            nodes <strong>{visibleSnapshot.nodes.length}</strong>
+          </span>
+          <span className="graph-surface__status-item">
+            edges <strong>{visibleSnapshot.edges.length}</strong>
+          </span>
+          <span className="graph-surface__status-item">
+            markdown <strong>{markdownLinkCount}</strong>
+          </span>
+          <span className="graph-surface__status-item">
+            mode <strong>{focusSelectedNeighborhood && selectedNode ? "focused" : "full"}</strong>
+          </span>
+          {highlightedNodeIds.length > 0 ? (
+            <span className="graph-surface__status-item">
+              touched <strong>{highlightedNodeIds.length}</strong>
+            </span>
+          ) : null}
+          {selectedNode ? (
+            <span className="graph-surface__status-item">
+              selected <strong>{selectedNode.label}</strong>
+            </span>
+          ) : (
+            <span className="graph-surface__status-item">
+              hint <strong>select a node to inspect it</strong>
+            </span>
+          )}
+        </footer>
       </div>
     </section>
   );

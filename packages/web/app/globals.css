@@ -2,6 +2,7 @@
   color-scheme: dark;
   --font-sans: "Space Grotesk", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
+  --workspace-menubar-height: 40px;
   --radius-panel: 16px;
   --radius-control: 10px;
   --radius-chip: 8px;
@@ -117,7 +118,7 @@ a {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 18px;
-  padding-top: 58px;
+  padding-top: calc(var(--workspace-menubar-height) + 18px);
 }
 
 .workspace__header {
@@ -326,7 +327,8 @@ a {
 }
 
 .workspace__content--prompt,
-.workspace__content--history {
+.workspace__content--history,
+.workspace__content--graph {
   height: 100%;
 }
 
@@ -571,6 +573,7 @@ a {
 .canvas-force-graph {
   position: relative;
   width: 100%;
+  height: 100%;
   min-height: 520px;
   border: 1px solid rgba(151, 255, 155, 0.16);
   border-radius: 16px;
@@ -605,7 +608,8 @@ a {
 .canvas-force-graph__canvas {
   display: block;
   width: 100%;
-  min-height: 520px;
+  height: 100%;
+  min-height: 0;
   cursor: grab;
 }
 
@@ -1213,62 +1217,105 @@ a {
 }
 
 .graph-surface {
-  height: auto;
   display: grid;
-  gap: 18px;
+  gap: 14px;
+  min-height: 0;
 }
 
-.graph-surface__header {
+.graph-surface--fullscreen {
+  min-height: 100%;
+  height: 100%;
+  gap: 0;
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.graph-surface__topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 18px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
 }
 
-.graph-surface__title {
-  margin: 0;
-  font-size: clamp(28px, 3.2vw, 42px);
-  line-height: 1.04;
-  letter-spacing: -0.03em;
-}
-
-.graph-surface__copy {
-  max-width: 62ch;
-}
-
-.graph-surface__stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+.graph-surface__topbar-side {
+  min-width: 0;
+  display: flex;
+  align-items: center;
   gap: 12px;
 }
 
-.graph-surface__context {
-  margin: -4px 0 0;
-  color: color-mix(in srgb, var(--text), #fff4a3 28%);
+.graph-surface__topbar-side--right {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.graph-surface__meta {
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.04em;
 }
 
-.graph-surface__layout {
-  min-height: auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
-  gap: 18px;
-  align-items: start;
+.graph-surface__viewport {
+  position: relative;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.graph-surface__graph {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+}
+
+.graph-surface__controls {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  z-index: 4;
+  max-width: min(calc(100% - 36px), 920px);
+  pointer-events: none;
+}
+
+.graph-surface__controls > * {
+  pointer-events: auto;
 }
 
 .graph-surface__toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-self: center;
+}
+
+.graph-menubar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.graph-menubar__selector {
+  flex: 0 0 auto;
+}
+
+.graph-menubar__controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .graph-surface__selector {
   display: inline-grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .graph-surface__tuning {
@@ -1340,7 +1387,7 @@ a {
 }
 
 .graph-surface__select {
-  min-width: 220px;
+  min-width: 170px;
   border: 1px solid var(--crt-button-border);
   border-radius: var(--radius-control);
   background: var(--crt-button-bg);
@@ -1350,19 +1397,60 @@ a {
   font-family: var(--font-mono);
 }
 
-.graph-surface__panel,
-.graph-surface__detail {
-  min-height: 0;
-}
-
 .graph-surface__legend {
   display: grid;
   gap: 14px;
-  margin-top: 14px;
   padding: 14px 16px;
   border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.02);
+  background:
+    linear-gradient(180deg, rgba(11, 21, 13, 0.96), rgba(7, 14, 9, 0.96));
+  box-shadow:
+    inset 0 0 0 1px rgba(151, 255, 155, 0.04),
+    0 18px 44px rgba(0, 0, 0, 0.26);
+}
+
+.graph-surface__legend--dock {
+  position: absolute;
+  right: 18px;
+  bottom: 54px;
+  z-index: 3;
+  width: min(320px, calc(100% - 36px));
+  max-height: 42px;
+  overflow: hidden;
+  transition:
+    max-height 180ms ease,
+    transform 180ms ease,
+    border-color 180ms ease;
+}
+
+.graph-surface__legend--dock:hover,
+.graph-surface__legend--dock:focus-within {
+  max-height: 280px;
+  transform: translateY(-4px);
+  border-color: color-mix(in srgb, var(--accent-2), transparent 44%);
+}
+
+.graph-surface__legend-peek {
+  display: flex;
+  align-items: center;
+  min-height: 12px;
+}
+
+.graph-surface__legend-panel {
+  display: grid;
+  gap: 14px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.graph-surface__legend--dock:hover .graph-surface__legend-panel,
+.graph-surface__legend--dock:focus-within .graph-surface__legend-panel {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .graph-surface__legend-group {
@@ -1430,6 +1518,66 @@ a {
   border-top-color: rgba(129, 217, 216, 0.72);
 }
 
+.graph-surface__sidepanel {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  bottom: 54px;
+  z-index: 3;
+  width: min(400px, calc(100% - 36px));
+  pointer-events: none;
+}
+
+.graph-surface__sidepanel-scroll {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  pointer-events: auto;
+}
+
+.graph-surface__detail--floating {
+  position: static;
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  background:
+    linear-gradient(180deg, rgba(12, 22, 14, 0.97), rgba(8, 15, 10, 0.97));
+  box-shadow:
+    inset 0 0 0 1px rgba(151, 255, 155, 0.04),
+    0 18px 48px rgba(0, 0, 0, 0.3);
+}
+
+.graph-surface__statusbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(151, 255, 155, 0.14);
+  background: rgba(5, 11, 7, 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.graph-surface__status-item {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+}
+
+.graph-surface__status-item strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .graph-surface--empty {
   min-height: calc(100vh - 180px);
 }
@@ -1475,6 +1623,11 @@ a {
     inset 0 0 0 1px rgba(151, 255, 155, 0.08),
     0 0 0 1px rgba(9, 20, 11, 0.9),
     0 0 22px rgba(76, 255, 112, 0.11);
+}
+
+.prompt-filter:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 
 .prompt-history__grid {
@@ -1626,9 +1779,9 @@ a {
   left: 0;
   right: 0;
   top: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   width: 100vw;
   padding: 5px 10px;
@@ -1646,7 +1799,15 @@ a {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  flex: 1 1 auto;
+  justify-self: start;
+}
+
+.workspace__footer-center {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
 }
 
 .workspace__footer-label {
@@ -1669,7 +1830,7 @@ a {
   gap: 6px;
   justify-content: flex-end;
   align-items: stretch;
-  flex: 0 0 auto;
+  justify-self: end;
 }
 
 .workspace__footer-toggle {
@@ -1848,10 +2009,29 @@ a {
   }
 
   .workspace__header,
-  .prompt-history__grid,
-  .graph-surface__layout,
-  .graph-surface__header {
+  .prompt-history__grid {
     grid-template-columns: 1fr;
+  }
+
+  .graph-surface--fullscreen {
+    min-height: 100%;
+    height: 100%;
+  }
+
+  .graph-surface__topbar {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+  }
+
+  .graph-surface__topbar-side,
+  .graph-surface__topbar-side--right {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .graph-surface__toolbar {
+    justify-self: stretch;
+    justify-content: center;
   }
 
   .prompt-zen {
@@ -1874,7 +2054,7 @@ a {
 
   .workspace__shell {
     gap: 14px;
-    padding-top: 98px;
+    padding-top: calc(var(--workspace-menubar-height) + 58px);
   }
 
   .workspace__brand,
@@ -1908,6 +2088,38 @@ a {
   .prompt-detail__step-row {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .graph-surface__detail--floating {
+    width: 100%;
+  }
+
+  .graph-surface__controls {
+    top: 12px;
+    left: 12px;
+    max-width: calc(100% - 24px);
+  }
+
+  .graph-surface__sidepanel {
+    top: auto;
+    right: 12px;
+    left: 12px;
+    bottom: 54px;
+    width: auto;
+    max-height: 48%;
+  }
+
+  .graph-surface__legend--dock {
+    right: 12px;
+    left: auto;
+    bottom: 54px;
+    width: min(280px, calc(100% - 24px));
+  }
+
+  .graph-surface__statusbar {
+    justify-content: flex-start;
+    padding-left: 12px;
+    padding-right: 12px;
   }
 
   .prompt-zen {
@@ -1956,9 +2168,23 @@ a {
   }
 
   .workspace__footer {
+    grid-template-columns: minmax(0, 1fr);
     gap: 0;
     padding: 6px 10px;
     overflow: hidden;
+  }
+
+  .workspace__footer-center {
+    width: 100%;
+    justify-content: flex-start;
+    padding-top: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+
+  .workspace__footer-center::-webkit-scrollbar {
+    display: none;
   }
 
   .workspace__footer-primary {
@@ -2040,7 +2266,31 @@ a {
     height: 9px;
   }
 
+  .graph-menubar {
+    justify-content: flex-start;
+  }
+
   .prompt-form textarea {
     min-height: 180px;
   }
+}
+
+.workspace--graph {
+  padding: 0;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+.workspace--graph .workspace__shell {
+  min-height: 100dvh;
+  padding-top: var(--workspace-menubar-height);
+  gap: 0;
+}
+
+.workspace--graph .workspace__content--graph {
+  position: fixed;
+  inset: var(--workspace-menubar-height) 0 0;
+  width: 100vw;
+  height: calc(100dvh - var(--workspace-menubar-height));
+  min-height: 0;
 }

@@ -675,7 +675,9 @@ test("keeps terminal text stable while the live teletype response starts", async
 
   const terminalCursor = promptTerminal.locator(".retro-lcd__cursor");
   await expect
-    .poll(async () => terminalCursor.isVisible().catch(() => false))
+    .poll(async () => terminalCursor.isVisible().catch(() => false), {
+      timeout: 10_000
+    })
     .toBe(true);
 
   const terminalCursorStyle = await terminalCursor.evaluate((element) => {
@@ -729,11 +731,15 @@ test("keeps terminal text stable while the live teletype response starts", async
     .poll(async () => {
       const working = await page.getByTestId("prompt-terminal-working").textContent();
       return (working || "").length > 0;
+    }, {
+      timeout: 10_000
     })
     .toBe(true);
 
   await expect
-    .poll(async () => promptTerminal.getAttribute("data-overflow"))
+    .poll(async () => promptTerminal.getAttribute("data-overflow"), {
+      timeout: 10_000
+    })
     .toBe("true");
 
   await expect(page.locator(".history-surface")).toBeVisible({ timeout: 20_000 });

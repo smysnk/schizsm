@@ -15,6 +15,7 @@ import {
   type CanvasGraphTuningSettings,
   findNodeAtWorldPoint,
   fitCameraToGraph,
+  getCanvasGraphEdgeGeometry,
   getCanvasGraphPinnedStorageKey,
   getCanvasGraphNeighborhood,
   mockCanvasGraphSnapshot,
@@ -60,6 +61,27 @@ const edgeStyle = (selectedNeighborhood: Set<string>, edge: CanvasGraphSnapshotR
     width: edge.kind === "markdown-link" ? 1.1 : 1.6,
     stroke: edge.tentative ? "rgba(129, 217, 216, 0.72)" : "rgba(137, 255, 151, 0.42)"
   };
+};
+
+const drawEdgeArrow = (
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  angle: number,
+  size: number
+) => {
+  context.beginPath();
+  context.moveTo(x, y);
+  context.lineTo(
+    x - Math.cos(angle - Math.PI / 6) * size,
+    y - Math.sin(angle - Math.PI / 6) * size
+  );
+  context.lineTo(
+    x - Math.cos(angle + Math.PI / 6) * size,
+    y - Math.sin(angle + Math.PI / 6) * size
+  );
+  context.closePath();
+  context.fill();
 };
 
 export const CanvasForceGraph = forwardRef<CanvasForceGraphHandle, CanvasForceGraphProps>(function CanvasForceGraph({
@@ -298,9 +320,28 @@ export const CanvasForceGraph = forwardRef<CanvasForceGraphHandle, CanvasForceGr
         const sourceScreen = worldToScreen(cameraRef.current, source.x, source.y);
         const targetScreen = worldToScreen(cameraRef.current, target.x, target.y);
         const style = edgeStyle(selectedNeighborhood, edge);
+        const geometry = getCanvasGraphEdgeGeometry(
+          {
+            id: source.id,
+            x: sourceScreen.x,
+            y: sourceScreen.y,
+            radius: source.radius * cameraRef.current.scale
+          },
+          {
+            id: target.id,
+            x: targetScreen.x,
+            y: targetScreen.y,
+            radius: target.radius * cameraRef.current.scale
+          },
+          edge
+        );
+        const emphasized =
+          !selectedNeighborhood.size ||
+          (selectedNeighborhood.has(edge.sourceId) && selectedNeighborhood.has(edge.targetId));
 
         context.save();
         context.strokeStyle = style.stroke;
+        context.fillStyle = style.stroke;
         context.globalAlpha = style.opacity;
         context.lineWidth = style.width;
 
@@ -309,10 +350,54 @@ export const CanvasForceGraph = forwardRef<CanvasForceGraphHandle, CanvasForceGr
         }
 
         context.beginPath();
-        context.moveTo(sourceScreen.x, sourceScreen.y);
-        context.lineTo(targetScreen.x, targetScreen.y);
+        context.moveTo(geometry.startX, geometry.startY);
+        context.quadraticCurveTo(
+          geometry.controlX,
+          geometry.controlY,
+          geometry.endX,
+          geometry.endY
+        );
         context.stroke();
+        drawEdgeArrow(
+          context,
+          geometry.endX,
+          geometry.endY,
+          geometry.arrowAngle,
+          edge.kind === "markdown-link" ? 6 : 7.5
+        );
         context.restore();
+
+        const shouldShowEdgeLabel =
+          Boolean(edge.label) &&
+          ((selectedNeighborhood.size > 0 && emphasized) || cameraRef.current.scale >= 1.28);
+
+        if (edge.label && shouldShowEdgeLabel) {
+          context.save();
+          context.globalAlpha = style.opacity;
+          context.font = `600 ${Math.max(10, 11 * cameraRef.current.scale)}px var(--font-mono, "IBM Plex Mono", monospace)`;
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          const metrics = context.measureText(edge.label);
+          const labelWidth = metrics.width + 12;
+          const labelHeight = 18;
+
+          context.fillStyle = "rgba(7, 14, 9, 0.88)";
+          context.strokeStyle = "rgba(151, 255, 155, 0.24)";
+          context.lineWidth = 1;
+          context.beginPath();
+          context.roundRect(
+            geometry.labelX - labelWidth / 2,
+            geometry.labelY - labelHeight / 2,
+            labelWidth,
+            labelHeight,
+            999
+          );
+          context.fill();
+          context.stroke();
+          context.fillStyle = "rgba(225, 255, 228, 0.9)";
+          context.fillText(edge.label, geometry.labelX, geometry.labelY + 0.5);
+          context.restore();
+        }
       }
 
       for (const node of state.nodes) {

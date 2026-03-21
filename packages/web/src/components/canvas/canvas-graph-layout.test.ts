@@ -3,9 +3,11 @@ import test from "node:test";
 import {
   applyPinnedNodes,
   buildCanvasGraphAdjacency,
+  getCanvasGraphEdgeGeometry,
   buildCanvasGraphRenderState,
   canvasGraphTuningStorageKey,
   defaultCanvasGraphTuningSettings,
+  filterCanvasGraphSnapshotToNeighborhood,
   findNodeAtWorldPoint,
   fitCameraToGraph,
   getCanvasGraphPinnedStorageKey,
@@ -87,6 +89,26 @@ test("getCanvasGraphNeighborhood returns the selected node plus first-degree nei
   ]);
 });
 
+test("filterCanvasGraphSnapshotToNeighborhood keeps only the selected node and first-degree edges", () => {
+  const focused = filterCanvasGraphSnapshotToNeighborhood(
+    mockCanvasGraphSnapshot,
+    "hypothesis-link"
+  );
+
+  assert.deepEqual(
+    focused.nodes.map((node) => node.id).sort(),
+    ["concept-frequency", "fragment-clock", "hypothesis-link"]
+  );
+  assert.deepEqual(
+    focused.edges.map((edge) => edge.id).sort(),
+    ["edge-clock-hypothesis", "edge-frequency-hypothesis"]
+  );
+  assert.equal(
+    filterCanvasGraphSnapshotToNeighborhood(mockCanvasGraphSnapshot, "missing-anchor"),
+    mockCanvasGraphSnapshot
+  );
+});
+
 test("findNodeAtWorldPoint hits nodes using their rendered radii", () => {
   const renderState = buildCanvasGraphRenderState(mockCanvasGraphSnapshot);
   const targetNode = renderState.nodes[0];
@@ -94,6 +116,24 @@ test("findNodeAtWorldPoint hits nodes using their rendered radii", () => {
 
   assert.equal(found?.id, targetNode.id);
   assert.equal(findNodeAtWorldPoint(renderState.nodes, 10_000, 10_000), null);
+});
+
+test("getCanvasGraphEdgeGeometry trims edges to node rims and produces a curved label point", () => {
+  const geometry = getCanvasGraphEdgeGeometry(
+    { id: "source", x: 0, y: 0, radius: 20 },
+    { id: "target", x: 200, y: 0, radius: 24 },
+    {
+      id: "edge-1",
+      kind: "canvas",
+      label: "related",
+      tentative: false
+    }
+  );
+
+  assert.ok(geometry.startX > 20);
+  assert.ok(geometry.endX < 176);
+  assert.notEqual(geometry.controlY, 0);
+  assert.notEqual(geometry.labelY, 0);
 });
 
 test("stepCanvasGraphSimulation advances unfrozen nodes while leaving pinned nodes fixed", () => {

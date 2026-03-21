@@ -1,5 +1,6 @@
 import type {
   CanvasGraphCamera,
+  CanvasGraphEdgeRecord,
   CanvasGraphPinnedNodeState,
   CanvasGraphRenderNode,
   CanvasGraphRenderState,
@@ -9,6 +10,24 @@ import type {
 type Viewport = {
   width: number;
   height: number;
+};
+
+type CanvasGraphScreenNode = Pick<CanvasGraphRenderNode, "id" | "radius"> & {
+  x: number;
+  y: number;
+};
+
+export type CanvasGraphEdgeGeometry = {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  controlX: number;
+  controlY: number;
+  labelX: number;
+  labelY: number;
+  arrowAngle: number;
+  bend: number;
 };
 
 type ForceGraphStepOptions = {
@@ -47,6 +66,16 @@ export const canvasGraphTuningStorageKey = "schizm.canvas-graph.tuning";
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+
+const hashString = (value: string) => {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+
+  return Math.abs(hash);
+};
 
 const hasFiniteNumber = (value: number | null | undefined): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -95,6 +124,25 @@ export const buildCanvasGraphAdjacency = (snapshot: CanvasGraphSnapshotRecord) =
   }
 
   return adjacency;
+};
+
+export const filterCanvasGraphSnapshotToNeighborhood = (
+  snapshot: CanvasGraphSnapshotRecord,
+  anchorId: string | null
+): CanvasGraphSnapshotRecord => {
+  if (!anchorId || !snapshot.nodes.some((node) => node.id === anchorId)) {
+    return snapshot;
+  }
+
+  const neighborhood = getCanvasGraphNeighborhood(buildCanvasGraphAdjacency(snapshot), anchorId);
+
+  return {
+    ...snapshot,
+    nodes: snapshot.nodes.filter((node) => neighborhood.has(node.id)),
+    edges: snapshot.edges.filter(
+      (edge) => neighborhood.has(edge.sourceId) && neighborhood.has(edge.targetId)
+    )
+  };
 };
 
 export const buildCanvasGraphRenderState = (
@@ -222,6 +270,48 @@ export const zoomCameraAtPoint = (
     scale: nextScale,
     x: pointerX - worldPoint.x * nextScale,
     y: pointerY - worldPoint.y * nextScale
+  };
+};
+
+export const getCanvasGraphEdgeGeometry = (
+  source: CanvasGraphScreenNode,
+  target: CanvasGraphScreenNode,
+  edge: Pick<CanvasGraphEdgeRecord, "id" | "kind" | "label" | "tentative">
+): CanvasGraphEdgeGeometry => {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  const distance = Math.max(Math.hypot(dx, dy), 1);
+  const unitX = dx / distance;
+  const unitY = dy / distance;
+  const perpX = -unitY;
+  const perpY = unitX;
+  const bendSeed = hashString(`${edge.id}:${source.id}:${target.id}`);
+  const bendSign = bendSeed % 2 === 0 ? 1 : -1;
+  const bendMultiplier =
+    edge.kind === "markdown-link" ? 0.82 : edge.tentative ? 1.15 : 1;
+  const bend = clamp(distance * 0.12 * bendMultiplier, 18, 54) * bendSign;
+  const startOffset = source.radius + 6;
+  const endOffset = target.radius + 12;
+  const startX = source.x + unitX * startOffset;
+  const startY = source.y + unitY * startOffset;
+  const endX = target.x - unitX * endOffset;
+  const endY = target.y - unitY * endOffset;
+  const midX = (startX + endX) / 2;
+  const midY = (startY + endY) / 2;
+  const controlX = midX + perpX * bend;
+  const controlY = midY + perpY * bend;
+
+  return {
+    startX,
+    startY,
+    endX,
+    endY,
+    controlX,
+    controlY,
+    labelX: 0.25 * startX + 0.5 * controlX + 0.25 * endX,
+    labelY: 0.25 * startY + 0.5 * controlY + 0.25 * endY,
+    arrowAngle: Math.atan2(endY - controlY, endX - controlX),
+    bend
   };
 };
 
